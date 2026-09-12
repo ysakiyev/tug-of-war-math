@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Tug of War Math</title>
+<style>
+  :root{
+    --sky-top:#7fd1ff;
+    --sky-bottom:#cdf0ff;
+    --sun:#ffe066;
+    --grass:#6fc24a;
+    --grass-dark:#4fa032;
+    --mud:#8a5a34;
+    --blue-team:#3a7bd5;
+    --red-team:#e0524a;
+    --ink:#2c3e50;
+    --cream:#fff8ea;
+    --accent:#ff9f43;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+    background:#000; touch-action:none; overscroll-behavior:none;
+    font-family:-apple-system, "SF Pro Rounded", "Segoe UI Rounded", "Nunito", system-ui, sans-serif;
+    color:var(--ink);
+  }
+  /* Fixed virtual game resolution. main() scales #stage as a whole to fit
+     the real viewport, so every device renders identical relative
+     proportions instead of recomputing layout per screen size. */
+  #stage{position:absolute; top:0; left:0; width:1600px; height:900px; transform-origin:0 0;}
+  canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+
+  .screen{
+    position:absolute; inset:0; display:none;
+    flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; text-align:center; pointer-events:none;
+  }
+  .screen.active{display:flex;}
+  .screen > *{pointer-events:auto;}
+
+  .card{
+    background:rgba(255,248,234,0.94);
+    border-radius:28px;
+    padding:28px 26px;
+    box-shadow:0 10px 0 rgba(0,0,0,0.12), 0 18px 30px rgba(0,0,0,0.18);
+    border:4px solid #fff;
+    max-width:420px;
+    width:100%;
+  }
+
+  h1.title{
+    font-size:38px;
+    font-weight:900;
+    margin:0 0 4px;
+    color:#fff;
+    text-shadow:0 3px 0 #d9782b, 0 6px 12px rgba(0,0,0,0.25);
+    letter-spacing:0.5px;
+  }
+  .rope-divider{
+    width:120px; height:8px; margin:10px auto 18px;
+    background:repeating-linear-gradient(90deg,#c98a4b 0 10px,#a9683a 10px 20px);
+    border-radius:6px; box-shadow:0 2px 0 rgba(0,0,0,0.2);
+  }
+  p.sub{margin:0 0 20px; font-size:15px; color:#5a4636; font-weight:700;}
+
+  .btn{
+    display:block; width:100%; border:none; border-radius:18px;
+    padding:16px 18px; margin:10px 0; font-size:18px; font-weight:800;
+    cursor:pointer; color:#fff; font-family:inherit;
+    box-shadow:0 5px 0 rgba(0,0,0,0.2);
+    transform:translateY(0); transition:transform .08s, box-shadow .08s;
+  }
+  .btn:active{transform:translateY(4px); box-shadow:0 1px 0 rgba(0,0,0,0.2);}
+  .btn-blue{background:linear-gradient(180deg,#5b9bf0,var(--blue-team));}
+  .btn-red{background:linear-gradient(180deg,#ef7b70,var(--red-team));}
+  .btn-orange{background:linear-gradient(180deg,#ffb95e,var(--accent));}
+  .btn-grey{background:linear-gradient(180deg,#aeb8c2,#8b96a3);}
+  .btn-green{background:linear-gradient(180deg,#8fd66a,var(--grass-dark));}
+  .btn-small{padding:10px 14px; font-size:14px; width:auto; display:inline-block;}
+
+  .diff-row{display:flex; gap:8px; margin-bottom:14px;}
+  .diff-row .btn{margin:0; flex:1; font-size:14px; padding:12px 6px;}
+  .diff-row .btn.selected{outline:3px solid #2c3e50; transform:scale(1.04);}
+
+  .code-display{
+    font-size:42px; font-weight:900; letter-spacing:8px;
+    background:#fff; border-radius:14px; padding:14px 10px; margin:14px 0;
+    color:var(--ink); border:3px dashed var(--accent);
+  }
+  input.code-input{
+    font-size:28px; font-weight:900; letter-spacing:6px; text-align:center;
+    width:100%; padding:12px; border-radius:14px; border:3px solid #ccc;
+    margin:14px 0; text-transform:uppercase; font-family:inherit;
+  }
+  .hint{font-size:13px; color:#7a6a5a; margin-top:-6px; margin-bottom:14px;}
+  .spinner{
+    width:26px; height:26px; border:4px solid #ddd; border-top-color:var(--accent);
+    border-radius:50%; margin:10px auto; animation:spin 0.8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .error-text{color:#c0392b; font-weight:800; font-size:14px; min-height:18px;}
+
+  /* in-game HUD */
+  #hud{
+    position:absolute; top:0; left:0; right:0; display:none;
+    padding:14px 16px calc(10px + env(safe-area-inset-top,0px));
+    justify-content:space-between; align-items:flex-start;
+    pointer-events:none; z-index:5;
+  }
+  #hud.active{display:flex;}
+  .name-tag{
+    font-weight:900; font-size:14px; color:#fff; padding:6px 12px; border-radius:12px;
+    box-shadow:0 3px 0 rgba(0,0,0,0.2);
+  }
+  .name-tag.left{background:var(--blue-team);}
+  .name-tag.right{background:var(--red-team);}
+  #back-btn{
+    position:absolute; top:calc(10px + env(safe-area-inset-top,0px)); left:14px;
+    background:rgba(0,0,0,0.35); color:#fff; border:none; border-radius:12px;
+    padding:8px 12px; font-size:13px; font-weight:800; z-index:6; display:none;
+  }
+  #back-btn.active{display:block;}
+
+  #question-panel{
+    position:absolute; left:0; right:0; bottom:0; display:none;
+    flex-direction:column; align-items:center;
+    padding:10px 14px calc(14px + env(safe-area-inset-bottom,0px));
+    pointer-events:none; z-index:5;
+  }
+  #question-panel.active{display:flex;}
+  #question-box{
+    pointer-events:auto;
+    background:rgba(255,255,255,0.96); border-radius:20px;
+    padding:10px 24px; font-size:30px; font-weight:900; color:var(--ink);
+    box-shadow:0 4px 0 rgba(0,0,0,0.15); margin-bottom:10px;
+    border:3px solid #fff;
+    transition:transform .12s;
+  }
+  #question-box.shake{animation:shake .3s;}
+  @keyframes shake{
+    0%,100%{transform:translateX(0);} 25%{transform:translateX(-10px);}
+    75%{transform:translateX(10px);}
+  }
+  #answers{
+    display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:420px;
+    pointer-events:auto;
+  }
+  .ans-btn{
+    background:linear-gradient(180deg,#fff,#f0eee4);
+    border:3px solid #fff; border-radius:16px; padding:14px 8px;
+    font-size:22px; font-weight:900; color:var(--ink);
+    box-shadow:0 4px 0 rgba(0,0,0,0.15); font-family:inherit;
+  }
+  .ans-btn:active{transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,0.15);}
+  .ans-btn.correct{background:linear-gradient(180deg,#a4e28c,#6fc24a); color:#fff;}
+  .ans-btn.wrong{background:linear-gradient(180deg,#f0938c,var(--red-team)); color:#fff;}
+
+  #countdown-overlay{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    z-index:8; pointer-events:none;
+  }
+  #countdown-overlay.active{display:flex;}
+  #countdown-num{
+    font-size:120px; font-weight:900; color:#fff;
+    text-shadow:0 6px 0 rgba(0,0,0,0.25);
+  }
+
+  .result-emoji{font-size:64px; margin-bottom:6px;}
+  .result-title{font-size:28px; font-weight:900; margin:0 0 6px;}
+  .result-sub{font-size:14px; color:#5a4636; margin:0 0 18px; font-weight:700;}
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="game"></canvas>
+
+  <button id="back-btn">← Menu</button>
+
+  <div id="hud">
+    <div class="name-tag left" id="left-tag">You</div>
+    <div class="name-tag right" id="right-tag">CPU</div>
+  </div>
+
+  <div id="countdown-overlay"><div id="countdown-num">3</div></div>
+
+  <div id="question-panel">
+    <div id="question-box">2 + 2</div>
+    <div id="answers">
+      <button class="ans-btn" data-idx="0">1</button>
+      <button class="ans-btn" data-idx="1">2</button>
+      <button class="ans-btn" data-idx="2">3</button>
+      <button class="ans-btn" data-idx="3">4</button>
+    </div>
+  </div>
+
+  <!-- MENU -->
+  <div class="screen active" id="screen-menu">
+    <h1 class="title">TUG OF WAR<br>MATH</h1>
+    <div class="rope-divider"></div>
+    <div class="card">
+      <p class="sub">Solve problems faster than your opponent to pull them into the mud!</p>
+      <button class="btn btn-blue" id="btn-vs-cpu">🤖 Play vs Computer</button>
+      <button class="btn btn-red" id="btn-vs-friend">🌐 Play vs a Friend</button>
+    </div>
+  </div>
+
+  <!-- CPU DIFFICULTY -->
+  <div class="screen" id="screen-cpu-setup">
+    <div class="card">
+      <h1 class="title" style="color:var(--ink); text-shadow:none; font-size:24px;">Choose difficulty</h1>
+      <div class="diff-row" id="diff-row">
+        <button class="btn btn-green selected" data-diff="easy">Easy</button>
+        <button class="btn btn-orange" data-diff="medium">Medium</button>
+        <button class="btn btn-red" data-diff="hard">Hard</button>
+      </div>
+      <button class="btn btn-blue" id="btn-start-cpu">Start Game</button>
+      <button class="btn btn-grey" id="btn-cpu-back">Back</button>
+    </div>
+  </div>
+
+  <!-- FRIEND MENU -->
+  <div class="screen" id="screen-friend-menu">
+    <div class="card">
+      <h1 class="title" style="color:var(--ink); text-shadow:none; font-size:24px;">Play with a friend</h1>
+      <p class="sub">Send your friend this website's link, then have one of you host and the other join.</p>
+      <button class="btn btn-blue" id="btn-host">Host a Game</button>
+      <button class="btn btn-red" id="btn-join">Join with a Code</button>
+      <button class="btn btn-grey" id="btn-friend-back">Back</button>
+    </div>
+  </div>
+
+  <!-- HOST WAITING -->
+  <div class="screen" id="screen-host">
+    <div class="card">
+      <h1 class="title" style="color:var(--ink); text-shadow:none; font-size:22px;">Your room code</h1>
+      <div class="code-display" id="host-code">A1B2</div>
+      <p class="hint">Tell your friend to tap "Join with a Code" and enter this.</p>
+      <div id="host-status">
+        <div class="spinner"></div>
+        <p class="sub" style="margin-bottom:0;">Waiting for a friend to join…</p>
+      </div>
+      <button class="btn btn-blue" id="btn-host-start" style="display:none;">Start Game</button>
+      <button class="btn btn-grey" id="btn-host-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- JOIN -->
+  <div class="screen" id="screen-join">
+    <div class="card">
+      <h1 class="title" style="color:var(--ink); text-shadow:none; font-size:22px;">Enter room code</h1>
+      <input class="code-input" id="join-input" maxlength="4" placeholder="A1B2" autocapitalize="characters">
+      <div class="error-text" id="join-error"></div>
+      <button class="btn btn-red" id="btn-join-confirm">Join</button>
+      <button class="btn btn-grey" id="btn-join-back">Back</button>
+      <div id="join-waiting" style="display:none; margin-top:10px;">
+        <div class="spinner"></div>
+        <p class="sub" style="margin-bottom:0;">Waiting for host to start…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULT -->
+  <div class="screen" id="screen-result">
+    <div class="card">
+      <div class="result-emoji" id="result-emoji">🏆</div>
+      <h2 class="result-title" id="result-title">You Win!</h2>
+      <p class="result-sub" id="result-sub">8 correct answers</p>
+      <button class="btn btn-blue" id="btn-play-again">Play Again</button>
+      <button class="btn btn-grey" id="btn-result-menu">Main Menu</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+// ---------- Canvas setup ----------
+// Fixed virtual resolution: every device draws the exact same scene in the
+// exact same coordinate space, then the whole #stage is scaled uniformly
+// to fit the real screen. This is what keeps two different devices (e.g.
+// a wide desktop window and an iPad) showing identical relative positions
+// instead of each computing its own proportions from its own W/H.
+const DESIGN_W = 1600, DESIGN_H = 900;
+const stageEl = document.getElementById('stage');
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = DESIGN_W; H = DESIGN_H;
+  canvas.width = W*DPR; canvas.height = H*DPR;
+  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+
+  const scale = Math.min(window.innerWidth/DESIGN_W, window.innerHeight/DESIGN_H);
+  const offsetX = (window.innerWidth - DESIGN_W*scale)/2;
+  const offsetY = (window.innerHeight - DESIGN_H*scale)/2;
+  stageEl.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- Helpers ----------
+function lerp(a,b,t){return a+(b-a)*t;}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+function rand(a,b){return a+Math.random()*(b-a);}
+function randInt(a,b){return Math.floor(rand(a,b+1));}
+function pick(arr){return arr[Math.floor(Math.random()*arr.length)];}
+function shadeColor(hex, percent){
+  const f=parseInt(hex.slice(1),16), t=percent<0?0:255, p=Math.abs(percent)/100;
+  const R=f>>16, G=(f>>8)&0xff, B=f&0xff;
+  const nr=Math.round((t-R)*p)+R, ng=Math.round((t-G)*p)+G, nb=Math.round((t-B)*p)+B;
+  return '#'+(0x1000000+nr*0x10000+ng*0x100+nb).toString(16).slice(1);
+}
+function roundRectPath(c,x,y,w,h,r){
+  c.beginPath();
+  c.moveTo(x+r,y);
+  c.arcTo(x+w,y,x+w,y+h,r);
+  c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r);
+  c.arcTo(x,y,x+w,y,r);
+  c.closePath();
+}
+
+// ---------- Screen management ----------
+const screens = {};
+document.querySelectorAll('.screen').forEach(el=>screens[el.id]=el);
+function showScreen(id){
+  Object.values(screens).forEach(s=>s.classList.remove('active'));
+  if(id) screens[id].classList.add('active');
+}
+const hud = document.getElementById('hud');
+const backBtn = document.getElementById('back-btn');
+const questionPanel = document.getElementById('question-panel');
+const questionBox = document.getElementById('question-box');
+const answersEl = document.getElementById('answers');
+const countdownOverlay = document.getElementById('countdown-overlay');
+const countdownNum = document.getElementById('countdown-num');
+const leftTag = document.getElementById('left-tag');
+const rightTag = document.getElementById('right-tag');
+
+function setInGameUI(on){
+  hud.classList.toggle('active',on);
+  backBtn.classList.toggle('active',on);
+  questionPanel.classList.toggle('active',on);
+}
+
+// ================= GAME STATE =================
+const WIN_THRESHOLD = 96;   // pos range -96..96
+const PULL_STEP = 14;
+
+let mode = null;            // 'cpu' | 'online'
+let running = false;
+let pos = 0;                 // visual authoritative-ish position (renderer target)
+let visualPos = 0;           // smoothed for rendering
+let leftScore = 0, rightScore = 0;
+let leftLabel = 'You', rightLabel = 'CPU';
+let difficulty = 'easy';
+let currentProblem = null;
+let cpuProblem = null;
+let opponentProblemText = '';
+let gameOverHandled = false;
+
+// particles
+let particles = [];
+function spawnBurst(x,y,color,count){
+  for(let i=0;i<count;i++){
+    particles.push({
+      x,y, vx:rand(-140,140), vy:rand(-260,-60),
+      g:600, life:rand(0.5,0.9), age:0, color, size:rand(3,6), rot:rand(0,6.28), vr:rand(-6,6)
+    });
+  }
+}
+function spawnDust(x,y,dir){
+  for(let i=0;i<6;i++){
+    particles.push({
+      x:x+rand(-10,10), y:y+rand(-4,4), vx:dir*rand(20,80), vy:rand(-40,-10),
+      g:200, life:rand(0.4,0.7), age:0, color:'rgba(150,120,90,0.5)', size:rand(4,9), rot:0, vr:0, dust:true
+    });
+  }
+}
+function updateParticles(dt){
+  particles.forEach(p=>{
+    p.age+=dt; p.vy+=p.g*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.rot+=p.vr*dt;
+  });
+  particles = particles.filter(p=>p.age<p.life);
+}
+function drawParticles(){
+  particles.forEach(p=>{
+    const t = 1-p.age/p.life;
+    ctx.save();
+    ctx.globalAlpha = clamp(t,0,1);
+    ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+    if(p.dust){
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(0,0,p.size,0,6.28); ctx.fill();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      for(let i=0;i<5;i++){
+        const a = i*2*Math.PI/5 - Math.PI/2;
+        const r = p.size;
+        ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+        const a2 = a + Math.PI/5;
+        ctx.lineTo(Math.cos(a2)*(r*0.45), Math.sin(a2)*(r*0.45));
+      }
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+// confetti for result screen
+let confetti = [];
+function spawnConfetti(){
+  confetti = [];
+  for(let i=0;i<80;i++){
+    confetti.push({
+      x:rand(0,W), y:rand(-H,0), vx:rand(-40,40), vy:rand(80,180),
+      color:pick(['#ffcf4d','#ff8a5c','#6fc24a','#5b9bf0','#e0524a','#ffffff']),
+      size:rand(5,10), rot:rand(0,6.28), vr:rand(-4,4)
+    });
+  }
+}
+function updateConfetti(dt){
+  confetti.forEach(c=>{ c.x+=c.vx*dt; c.y+=c.vy*dt; c.rot+=c.vr*dt; if(c.y>H+20){c.y=-10; c.x=rand(0,W);} });
+}
+function drawConfetti(){
+  confetti.forEach(c=>{
+    ctx.save(); ctx.translate(c.x,c.y); ctx.rotate(c.rot);
+    ctx.fillStyle=c.color; ctx.fillRect(-c.size/2,-c.size/2*0.6,c.size,c.size*0.6);
+    ctx.restore();
+  });
+}
+
+// ---------- Character animation state ----------
+const leftChar = {bounce:0, blinkT:rand(1,4), blink:false, lean:0, pullPulse:0};
+const rightChar = {bounce:0, blinkT:rand(1,4), blink:false, lean:0, pullPulse:0};
+
+function updateChar(c,dt,winning){
+  c.bounce += dt*(winning?5:3.2);
+  c.blinkT -= dt;
+  if(c.blinkT<=0){ c.blink = !c.blink; c.blinkT = c.blink? 0.12 : rand(1.5,4); }
+  c.lean = lerp(c.lean, winning? -0.12 : 0.18, dt*4);
+  c.pullPulse = Math.max(0, c.pullPulse - dt*3);
+}
+
+function drawCharacter(x,y,scale,color,mirror,c,label){
+  ctx.save();
+  ctx.translate(x,y);
+  // shadow
+  ctx.save();
+  ctx.translate(0, 62*scale); ctx.scale(1,0.28);
+  ctx.beginPath(); ctx.arc(0,0,34*scale,0,Math.PI*2);
+  ctx.fillStyle='rgba(30,20,10,0.28)'; ctx.fill();
+  ctx.restore();
+
+  ctx.scale(mirror?-1:1,1);
+  ctx.rotate(c.lean*(mirror?-1:1));
+  const bob = Math.sin(c.bounce)*3.2*scale;
+  ctx.translate(0,bob);
+
+  // back leg
+  ctx.strokeStyle = shadeColor(color,-35); ctx.lineWidth=11*scale; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(6*scale,26*scale); ctx.lineTo(22*scale,54*scale); ctx.stroke();
+  // back arm reaching to rope (drawn behind body)
+  ctx.strokeStyle = '#f3c89a'; ctx.lineWidth=9*scale;
+  ctx.beginPath(); ctx.moveTo(-14*scale,-2*scale); ctx.lineTo(-40*scale, 4*scale+Math.sin(c.bounce*2)*2*scale); ctx.stroke();
+
+  // body
+  const grad = ctx.createLinearGradient(0,-34*scale,0,28*scale);
+  grad.addColorStop(0, shadeColor(color,18));
+  grad.addColorStop(1, color);
+  ctx.fillStyle = grad;
+  roundRectPath(ctx,-27*scale,-32*scale,54*scale,58*scale,20*scale);
+  ctx.fill();
+  ctx.lineWidth=3; ctx.strokeStyle=shadeColor(color,-40); ctx.stroke();
+  // belt
+  ctx.fillStyle = shadeColor(color,-45);
+  ctx.fillRect(-27*scale, 14*scale, 54*scale, 7*scale);
+
+  // front leg
+  ctx.strokeStyle = shadeColor(color,-20); ctx.lineWidth=11*scale;
+  ctx.beginPath(); ctx.moveTo(-6*scale,26*scale); ctx.lineTo(-24*scale,54*scale); ctx.stroke();
+  // foot
+  ctx.fillStyle = '#5a4636';
+  ctx.beginPath(); ctx.ellipse(-26*scale,55*scale,10*scale,5*scale,0.3,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(24*scale,55*scale,10*scale,5*scale,-0.3,0,6.28); ctx.fill();
+
+  // front arm gripping rope
+  const armPunch = 1+c.pullPulse*0.4;
+  ctx.strokeStyle = '#f3c89a'; ctx.lineWidth=10*scale*armPunch;
+  ctx.beginPath(); ctx.moveTo(-16*scale,-6*scale); ctx.lineTo(-46*scale*armPunch,-8*scale); ctx.stroke();
+  // hand
+  ctx.fillStyle = '#f3c89a';
+  ctx.beginPath(); ctx.arc(-46*scale*armPunch,-8*scale,7*scale,0,6.28); ctx.fill();
+
+  // head
+  ctx.save(); ctx.translate(0,-46*scale);
+  const hg = ctx.createRadialGradient(-8*scale,-8*scale,4,0,0,27*scale);
+  hg.addColorStop(0,'#ffe3c2'); hg.addColorStop(1,'#f2c093');
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(0,0,25*scale,0,6.28); ctx.fill();
+
+  // headband
+  ctx.fillStyle = shadeColor(color,-10);
+  ctx.beginPath(); ctx.arc(0,-2*scale,25*scale,Math.PI*1.08,Math.PI*1.92); ctx.lineTo(20*scale,-16*scale); ctx.lineTo(-20*scale,-16*scale); ctx.closePath(); ctx.fill();
+
+  if(!c.blink){
+    ctx.fillStyle='#2c2c2c';
+    ctx.beginPath(); ctx.arc(-8*scale,-1*scale,3.6*scale,0,6.28); ctx.fill();
+    ctx.beginPath(); ctx.arc(9*scale,-1*scale,3.6*scale,0,6.28); ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(-6.5*scale,-2.5*scale,1.2*scale,0,6.28); ctx.fill();
+    ctx.beginPath(); ctx.arc(10.5*scale,-2.5*scale,1.2*scale,0,6.28); ctx.fill();
+  } else {
+    ctx.strokeStyle='#2c2c2c'; ctx.lineWidth=2.4*scale; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-12*scale,-1*scale); ctx.lineTo(-4*scale,-1*scale); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(5*scale,-1*scale); ctx.lineTo(13*scale,-1*scale); ctx.stroke();
+  }
+  // cheeks
+  ctx.fillStyle='rgba(230,110,100,0.35)';
+  ctx.beginPath(); ctx.arc(-14*scale,7*scale,4*scale,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.arc(15*scale,7*scale,4*scale,0,6.28); ctx.fill();
+  // mouth - effort grimace
+  ctx.strokeStyle='#8a4a3a'; ctx.lineWidth=2.4*scale; ctx.lineCap='round';
+  ctx.beginPath(); ctx.arc(0,11*scale,6*scale,0.15*Math.PI,0.85*Math.PI); ctx.stroke();
+  ctx.restore(); // head
+
+  ctx.restore(); // full char transform
+
+  // label (not mirrored/rotated)
+  ctx.save();
+  ctx.font = `900 ${13*scale}px -apple-system, sans-serif`;
+  ctx.textAlign='center';
+  ctx.fillStyle='rgba(0,0,0,0.55)';
+  ctx.fillText(label, x, y+80*scale+1);
+  ctx.fillStyle='#fff';
+  ctx.fillText(label, x, y+80*scale);
+  ctx.restore();
+}
+
+// ---------- Speech bubbles ----------
+function drawBubble(x,y,text,accent){
+  if(!text) return;
+  ctx.save();
+  ctx.font = '900 20px -apple-system, sans-serif';
+  const padX=16, padY=10;
+  const w = ctx.measureText(text).width + padX*2;
+  const h = 36;
+  const bx = x - w/2, by = y - h;
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.strokeStyle = accent; ctx.lineWidth=3;
+  roundRectPath(ctx, bx, by, w, h, 14);
+  ctx.fill(); ctx.stroke();
+  // tail
+  ctx.beginPath();
+  ctx.moveTo(x-8,by+h);
+  ctx.lineTo(x+8,by+h);
+  ctx.lineTo(x,by+h+10);
+  ctx.closePath();
+  ctx.fillStyle='rgba(255,255,255,0.95)';
+  ctx.fill();
+  ctx.strokeStyle=accent; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(x-8,by+h); ctx.lineTo(x,by+h+10); ctx.lineTo(x+8,by+h); ctx.stroke();
+  // text
+  ctx.fillStyle = '#2c3e50';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, x, by+h/2+1);
+  ctx.restore();
+}
+
+// ---------- Scene drawing ----------
+let shakeT=0, shakeMag=0;
+function triggerShake(mag){ shakeT=0.35; shakeMag=mag; }
+
+function drawScene(dt){
+  ctx.clearRect(0,0,W,H);
+
+  // shake offset
+  let ox=0, oy=0;
+  if(shakeT>0){
+    shakeT-=dt;
+    const m = shakeMag*(shakeT/0.35);
+    ox = rand(-m,m); oy = rand(-m,m);
+  }
+  ctx.save();
+  ctx.translate(ox,oy);
+
+  const groundY = H*0.66;
+
+  // sky
+  const skyGrad = ctx.createLinearGradient(0,0,0,groundY);
+  skyGrad.addColorStop(0,'#5fb8f5');
+  skyGrad.addColorStop(1,'#cdeeff');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0,0,W,groundY+2);
+
+  // sun
+  ctx.fillStyle = '#ffe066';
+  ctx.beginPath(); ctx.arc(W*0.85, H*0.14, 40, 0, 6.28); ctx.fill();
+
+  // clouds
+  const t = performance.now()/1000;
+  drawCloud(W*0.15 + Math.sin(t*0.05)*20, H*0.12, 1);
+  drawCloud(W*0.55 + Math.sin(t*0.04+2)*20, H*0.20, 0.7);
+
+  // grass
+  const grassGrad = ctx.createLinearGradient(0,groundY,0,H);
+  grassGrad.addColorStop(0,'#7bcf52');
+  grassGrad.addColorStop(1,'#4a9a30');
+  ctx.fillStyle = grassGrad;
+  ctx.fillRect(0,groundY,W,H-groundY);
+
+  // mud pits at each threshold
+  const mapScale = (W*0.34)/WIN_THRESHOLD;
+  const cx = W/2;
+  function mudPit(dirSign){
+    const px = cx + dirSign*W*0.42;
+    const grad = ctx.createRadialGradient(px,groundY+34,4,px,groundY+34,70);
+    grad.addColorStop(0,'#5a3a20'); grad.addColorStop(1,'rgba(90,58,32,0)');
+    ctx.fillStyle=grad;
+    ctx.beginPath(); ctx.ellipse(px,groundY+30,80,26,0,0,6.28); ctx.fill();
+    // hazard stripes
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(px,groundY+22,60,14,0,0,6.28); ctx.clip();
+    ctx.fillStyle='#caa24a';
+    for(let i=-4;i<5;i++){
+      ctx.save(); ctx.translate(px+i*20,groundY+22); ctx.rotate(0.6);
+      ctx.fillRect(-4,-30,7,60); ctx.restore();
+    }
+    ctx.restore();
+  }
+  mudPit(-1); mudPit(1);
+
+  // center line
+  ctx.strokeStyle='rgba(255,255,255,0.6)';
+  ctx.setLineDash([6,8]);
+  ctx.beginPath(); ctx.moveTo(cx,groundY-2); ctx.lineTo(cx,groundY+40); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // rope shift
+  const shift = visualPos*mapScale;
+  const leftX = cx - 130 + shift;
+  const rightX = cx + 130 + shift;
+  const ropeY = groundY - 26;
+
+  // rope sag based on how far from center (tension)
+  const tension = clamp(1-Math.abs(visualPos)/WIN_THRESHOLD, 0.15, 1);
+  const sag = 22*(1-tension)+6;
+
+  ctx.strokeStyle = '#a9683a';
+  ctx.lineWidth = 9;
+  ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(leftX,ropeY);
+  ctx.quadraticCurveTo(cx+shift, ropeY+sag, rightX,ropeY);
+  ctx.stroke();
+  // twist texture
+  ctx.strokeStyle='rgba(0,0,0,0.15)'; ctx.lineWidth=2;
+  for(let i=0;i<=10;i++){
+    const tt=i/10;
+    const px = lerp(leftX,rightX,tt);
+    const py = ropeY + sag*4*tt*(1-tt) + Math.sin(tt*20+t*3)*1.5;
+    ctx.beginPath(); ctx.moveTo(px-4,py-4); ctx.lineTo(px+4,py+4); ctx.stroke();
+  }
+
+  // knot/flag at center of rope
+  const knotX = cx+shift, knotY = ropeY+sag;
+  ctx.fillStyle='#e0524a';
+  ctx.beginPath(); ctx.moveTo(knotX,knotY-18); ctx.lineTo(knotX+16,knotY-10); ctx.lineTo(knotX,knotY-2); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#7a4a2a'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(knotX,knotY-18); ctx.lineTo(knotX,knotY+4); ctx.stroke();
+  ctx.fillStyle='#c98a4b';
+  ctx.beginPath(); ctx.arc(knotX,knotY,7,0,6.28); ctx.fill();
+
+  // characters
+  const leaningLeft = visualPos < -2;
+  const leaningRight = visualPos > 2;
+  drawCharacter(leftX-24, groundY-4, 1.05, '#3a7bd5', false, leftChar, leftLabel);
+  drawCharacter(rightX+24, groundY-4, 1.05, '#e0524a', true, rightChar, rightLabel);
+
+  if(running){
+    // Host/CPU-mode "you" is drawn on the left; the guest is drawn on the
+    // right (see beginOnlineGame), so bubble sides must follow the same
+    // rule instead of always assuming "left" is the local player.
+    const myText = currentProblem ? currentProblem.text : '';
+    const oppText = mode==='cpu' ? (cpuProblem?cpuProblem.text:'') : opponentProblemText;
+    const iAmGuest = mode==='online' && role==='guest';
+    const leftText = iAmGuest ? oppText : myText;
+    const rightText = iAmGuest ? myText : oppText;
+    drawBubble(leftX-24, groundY-4-98, leftText, '#3a7bd5');
+    drawBubble(rightX+24, groundY-4-98, rightText, '#e0524a');
+  }
+
+  drawParticles();
+
+  ctx.restore(); // shake
+}
+
+function drawCloud(x,y,s){
+  ctx.save();
+  ctx.translate(x,y); ctx.scale(s,s);
+  ctx.fillStyle='rgba(255,255,255,0.9)';
+  ctx.beginPath();
+  ctx.arc(0,0,22,0,6.28);
+  ctx.arc(24,-8,18,0,6.28);
+  ctx.arc(-24,-4,16,0,6.28);
+  ctx.arc(10,8,20,0,6.28);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ---------- Main loop ----------
+let lastT = performance.now();
+function loop(now){
+  const dt = Math.min(0.05,(now-lastT)/1000);
+  lastT = now;
+
+  visualPos = lerp(visualPos, pos, clamp(dt*6,0,1));
+  updateChar(leftChar, dt, visualPos<0);
+  updateChar(rightChar, dt, visualPos>0);
+  updateParticles(dt);
+
+  if(screens['screen-result'].classList.contains('active')){
+    updateConfetti(dt);
+  }
+
+  drawScene(dt);
+
+  if(screens['screen-result'].classList.contains('active')){
+    drawConfetti();
+  }
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ================= MATH PROBLEMS =================
+function generateProblem(diff){
+  let a,b,op,answer;
+  const ops = diff==='easy' ? ['+','-'] : diff==='medium' ? ['+','-','×'] : ['+','-','×','÷'];
+  op = pick(ops);
+  if(op==='+'){
+    const max = diff==='easy'?10:diff==='medium'?30:80;
+    a=randInt(1,max); b=randInt(1,max); answer=a+b;
+  } else if(op==='-'){
+    const max = diff==='easy'?10:diff==='medium'?30:80;
+    a=randInt(1,max); b=randInt(0,a); answer=a-b;
+  } else if(op==='×'){
+    const max = diff==='easy'?5:diff==='medium'?10:12;
+    a=randInt(1,max); b=randInt(1,max); answer=a*b;
+  } else { // divide, ensure whole number
+    const max = diff==='medium'?10:12;
+    b=randInt(2,max); answer=randInt(1,max); a=b*answer;
+  }
+  const opts = new Set([answer]);
+  while(opts.size<4){
+    const delta = randInt(1, Math.max(3,Math.round(Math.abs(answer)*0.3)+2));
+    const v = Math.random()<0.5 ? answer+delta : answer-delta;
+    if(v!==answer) opts.add(v);
+  }
+  const optionsArr = Array.from(opts);
+  for(let i=optionsArr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [optionsArr[i],optionsArr[j]]=[optionsArr[j],optionsArr[i]];
+  }
+  return {text:`${a} ${op} ${b}`, answer, options:optionsArr};
+}
+
+function renderProblem(){
+  currentProblem = generateProblem(difficulty);
+  questionBox.textContent = currentProblem.text;
+  const btns = answersEl.querySelectorAll('.ans-btn');
+  btns.forEach((btn,i)=>{
+    btn.textContent = currentProblem.options[i];
+    btn.classList.remove('correct','wrong');
+    btn.disabled=false;
+  });
+  if(mode==='online') syncOnlineState();
+}
+
+let answerLocked=false;
+answersEl.addEventListener('click', (e)=>{
+  const btn = e.target.closest('.ans-btn');
+  if(!btn || answerLocked || !running) return;
+  const idx = +btn.dataset.idx;
+  const val = currentProblem.options[idx];
+  answerLocked = true;
+  const btns = answersEl.querySelectorAll('.ans-btn');
+  btns.forEach(b=>b.disabled=true);
+
+  if(val===currentProblem.answer){
+    btn.classList.add('correct');
+    onLocalCorrect();
+  } else {
+    btn.classList.add('wrong');
+    questionBox.classList.add('shake');
+    setTimeout(()=>questionBox.classList.remove('shake'),300);
+  }
+  setTimeout(()=>{
+    answerLocked=false;
+    if(running) renderProblem();
+  }, val===currentProblem.answer ? 250 : 550);
+});
+
+// ================= CPU MODE =================
+let cpuTimer = 0;
+function cpuAccuracy(){ return difficulty==='easy'?0.45:difficulty==='medium'?0.65:0.85; }
+function cpuInterval(){ return difficulty==='easy'?rand(1.6,2.6):difficulty==='medium'?rand(1.1,1.9):rand(0.7,1.3); }
+
+function onLocalCorrect(){
+  // Host and CPU-mode players are drawn on the left; the guest is drawn on
+  // the right (see beginOnlineGame). A local correct answer must pull the
+  // rope toward whichever side is actually "you" on this client.
+  const groundY = H*0.66;
+  if(mode==='online' && role==='guest'){
+    rightScore++;
+    pos = clamp(pos + PULL_STEP, -WIN_THRESHOLD, WIN_THRESHOLD);
+    rightChar.pullPulse = 1;
+    spawnBurst(W/2 + 40 + visualPos*2, groundY-90, '#ffd23f', 14);
+    spawnDust(W*0.70, groundY, 1);
+  } else {
+    leftScore++;
+    pos = clamp(pos - PULL_STEP, -WIN_THRESHOLD, WIN_THRESHOLD);
+    leftChar.pullPulse = 1;
+    spawnBurst(W/2 - 40 + visualPos*2, groundY-90, '#ffd23f', 14);
+    spawnDust(W*0.30, groundY, -1);
+  }
+  checkWinCPU();
+  if(mode==='online') sendOnlineScore();
+}
+
+function cpuCorrect(){
+  rightScore++;
+  pos = clamp(pos + PULL_STEP, -WIN_THRESHOLD, WIN_THRESHOLD);
+  rightChar.pullPulse = 1;
+  const groundY = H*0.66;
+  spawnBurst(W/2 + 40 + visualPos*2, groundY-90, '#ff8a5c', 14);
+  spawnDust(W*0.70, groundY, 1);
+  checkWinCPU();
+}
+
+function checkWinCPU(){
+  if(gameOverHandled) return;
+  if(pos<=-WIN_THRESHOLD){ endGame('left'); }
+  else if(pos>=WIN_THRESHOLD){ endGame('right'); }
+  else if(Math.abs(pos)>=WIN_THRESHOLD*0.6) triggerShake(4);
+}
+
+function cpuTick(dt){
+  if(!running || mode!=='cpu') return;
+  cpuTimer -= dt;
+  if(cpuTimer<=0){
+    cpuTimer = cpuInterval();
+    if(Math.random() < cpuAccuracy()) cpuCorrect();
+    cpuProblem = generateProblem(difficulty);
+  }
+}
+const _origLoop = loop;
+// hook cpu tick into main loop via separate rAF-independent timer
+setInterval(()=>{ cpuTick(0.1); }, 100);
+
+// ================= ONLINE MODE (WebSocket) =================
+let roomCode = null;
+let role = null; // 'host' | 'guest'
+let ws = null;
+let myOnlineScore=0, oppOnlineScore=0;
+
+function wsURL(){
+  return (location.protocol==='https:'?'wss://':'ws://') + location.host + '/ws';
+}
+
+function connectWS(onOpen, onFail){
+  if(ws && ws.readyState===WebSocket.OPEN){ onOpen && onOpen(); return; }
+  try{ ws = new WebSocket(wsURL()); }
+  catch(e){ onFail && onFail(); return; }
+  ws.onopen = ()=>{ onOpen && onOpen(); };
+  ws.onerror = ()=>{ onFail && onFail(); };
+  ws.onclose = ()=>{
+    if(running && mode==='online'){ handleOpponentGone(); }
+  };
+  ws.onmessage = (ev)=>{
+    let m; try{ m = JSON.parse(ev.data); } catch(e){ return; }
+    handleWSMessage(m);
+  };
+}
+
+function wsSend(obj){
+  if(ws && ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function handleWSMessage(m){
+  switch(m.type){
+    case 'hosted':
+      roomCode = m.code; role = 'host';
+      document.getElementById('host-code').textContent = roomCode;
+      break;
+    case 'joined':
+      role = 'guest';
+      document.getElementById('join-error').textContent='';
+      break;
+    case 'guestJoined':
+      document.getElementById('host-status').style.display='none';
+      document.getElementById('btn-host-start').style.display='block';
+      break;
+    case 'error':
+      document.getElementById('join-error').textContent = m.message || 'Something went wrong.';
+      document.getElementById('join-waiting').style.display='none';
+      break;
+    case 'start':
+      beginOnlineGame(role, m.startedAt);
+      break;
+    case 'opponent':
+      if(!running) return;
+      opponentProblemText = m.problem || '';
+      if(typeof m.score==='number' && m.score!==oppOnlineScore){
+        const delta = m.score - oppOnlineScore;
+        oppOnlineScore = m.score;
+        for(let i=0;i<delta;i++){
+          if(role==='host'){ rightScore++; pos=clamp(pos+PULL_STEP,-WIN_THRESHOLD,WIN_THRESHOLD); rightChar.pullPulse=1; }
+          else { leftScore++; pos=clamp(pos-PULL_STEP,-WIN_THRESHOLD,WIN_THRESHOLD); leftChar.pullPulse=1; }
+        }
+        checkWinOnline();
+      }
+      break;
+    case 'opponentLeft':
+      handleOpponentGone();
+      break;
+  }
+}
+
+function handleOpponentGone(){
+  if(running){
+    running = false;
+    setInGameUI(false);
+    document.getElementById('result-emoji').textContent='🚪';
+    document.getElementById('result-title').textContent='Friend Disconnected';
+    document.getElementById('result-sub').textContent='';
+    showScreen('screen-result');
+  } else if(screens['screen-host'].classList.contains('active')){
+    document.getElementById('host-status').style.display='block';
+    document.getElementById('btn-host-start').style.display='none';
+  }
+}
+
+function hostCreateRoom(){
+  document.getElementById('host-code').textContent='----';
+  document.getElementById('host-status').style.display='block';
+  document.getElementById('btn-host-start').style.display='none';
+  showScreen('screen-host');
+  connectWS(
+    ()=> wsSend({type:'host'}),
+    ()=>{ document.getElementById('host-status').innerHTML = '<p class="sub" style="margin-bottom:0;">Could not connect to the server.</p>'; }
+  );
+}
+
+function hostStartGame(){
+  wsSend({type:'start'});
+}
+
+function joinRoom(code){
+  const errEl = document.getElementById('join-error');
+  errEl.textContent='';
+  document.getElementById('join-waiting').style.display='block';
+  connectWS(
+    ()=> wsSend({type:'join', code}),
+    ()=>{ errEl.textContent='Could not connect to the server.'; document.getElementById('join-waiting').style.display='none'; }
+  );
+}
+
+function beginOnlineGame(myRole, startedAt){
+  role = myRole;
+  leftLabel = myRole==='host' ? 'You' : 'Friend';
+  rightLabel = myRole==='host' ? 'Friend' : 'You';
+  leftTag.textContent = leftLabel;
+  rightTag.textContent = rightLabel;
+  myOnlineScore=0; oppOnlineScore=0; pos=0; visualPos=0; gameOverHandled=false;
+  mode='online';
+  showScreen(null);
+  setInGameUI(true);
+  runCountdownThen(startedAt, ()=>{
+    running=true;
+    difficulty='medium';
+    renderProblem();
+  });
+}
+
+function syncOnlineState(){
+  wsSend({type:'progress', score: myOnlineScore, problem: currentProblem?currentProblem.text:''});
+}
+
+function sendOnlineScore(){
+  myOnlineScore++;
+  syncOnlineState();
+}
+
+function checkWinOnline(){
+  if(gameOverHandled) return;
+  if(pos<=-WIN_THRESHOLD){ endGame('left'); }
+  else if(pos>=WIN_THRESHOLD){ endGame('right'); }
+  else if(Math.abs(pos)>=WIN_THRESHOLD*0.6) triggerShake(4);
+}
+
+function cleanupOnline(){
+  if(ws){
+    try{ wsSend({type:'leave'}); ws.onclose=null; ws.close(); }catch(e){}
+    ws=null;
+  }
+  roomCode=null; role=null;
+}
+
+// ================= FLOW / SCREENS =================
+function resetGameState(){
+  pos=0; visualPos=0; leftScore=0; rightScore=0; particles=[]; gameOverHandled=false; running=false;
+  cpuProblem=null; opponentProblemText=''; currentProblem=null;
+}
+
+function runCountdownThen(startedAt, cb){
+  countdownOverlay.classList.add('active');
+  function tick(){
+    const remain = Math.ceil((startedAt-Date.now())/1000);
+    if(remain>0){
+      countdownNum.textContent = remain;
+      requestAnimationFrame(()=>setTimeout(tick,50));
+    } else {
+      countdownOverlay.classList.remove('active');
+      cb();
+    }
+  }
+  if(Date.now()>=startedAt){ countdownOverlay.classList.remove('active'); cb(); }
+  else tick();
+}
+
+function startCPUGame(){
+  resetGameState();
+  mode='cpu';
+  leftLabel='You'; rightLabel='CPU ('+difficulty[0].toUpperCase()+difficulty.slice(1)+')';
+  leftTag.textContent='You'; rightTag.textContent = rightLabel;
+  showScreen(null);
+  setInGameUI(true);
+  cpuTimer = cpuInterval();
+  cpuProblem = generateProblem(difficulty);
+  const startedAt = Date.now()+2200;
+  runCountdownThen(startedAt, ()=>{
+    running=true;
+    renderProblem();
+  });
+}
+
+function endGame(winnerSide){
+  gameOverHandled = true;
+  running = false;
+  setInGameUI(false);
+  triggerShake(10);
+  setTimeout(()=>{
+    const iWon = mode==='cpu' ? winnerSide==='left'
+      : (role==='host' ? winnerSide==='left' : winnerSide==='right');
+    document.getElementById('result-emoji').textContent = iWon ? '🏆' : '😅';
+    document.getElementById('result-title').textContent = iWon ? 'You Win!' : (mode==='cpu' ? 'CPU Wins!' : 'You Lose!');
+    const mine = mode==='cpu' ? leftScore : (role==='host'?leftScore:rightScore);
+    document.getElementById('result-sub').textContent = `${mine} correct answers`;
+    spawnConfetti();
+    showScreen('screen-result');
+  }, 500);
+}
+
+// ---------- Button wiring ----------
+document.getElementById('btn-vs-cpu').onclick = ()=> showScreen('screen-cpu-setup');
+document.getElementById('btn-vs-friend').onclick = ()=> showScreen('screen-friend-menu');
+document.getElementById('btn-cpu-back').onclick = ()=> showScreen('screen-menu');
+document.getElementById('btn-friend-back').onclick = ()=> showScreen('screen-menu');
+
+document.getElementById('diff-row').addEventListener('click',(e)=>{
+  const btn = e.target.closest('button[data-diff]');
+  if(!btn) return;
+  difficulty = btn.dataset.diff;
+  document.querySelectorAll('#diff-row .btn').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+});
+document.getElementById('btn-start-cpu').onclick = ()=> startCPUGame();
+
+document.getElementById('btn-host').onclick = ()=> hostCreateRoom();
+document.getElementById('btn-host-start').onclick = ()=> hostStartGame();
+document.getElementById('btn-host-cancel').onclick = ()=>{ cleanupOnline(); showScreen('screen-friend-menu'); };
+
+document.getElementById('btn-join').onclick = ()=>{
+  document.getElementById('join-input').value='';
+  document.getElementById('join-error').textContent='';
+  document.getElementById('join-waiting').style.display='none';
+  showScreen('screen-join');
+};
+document.getElementById('btn-join-back').onclick = ()=>{ cleanupOnline(); showScreen('screen-friend-menu'); };
+document.getElementById('btn-join-confirm').onclick = ()=>{
+  const code = document.getElementById('join-input').value.trim().toUpperCase();
+  if(code.length<4){ document.getElementById('join-error').textContent='Enter the 4-character code.'; return; }
+  joinRoom(code);
+};
+
+document.getElementById('btn-play-again').onclick = ()=>{
+  cleanupOnline();
+  resetGameState();
+  showScreen('screen-menu');
+};
+document.getElementById('btn-result-menu').onclick = ()=>{
+  cleanupOnline();
+  resetGameState();
+  showScreen('screen-menu');
+};
+backBtn.onclick = ()=>{
+  cleanupOnline();
+  resetGameState();
+  setInGameUI(false);
+  countdownOverlay.classList.remove('active');
+  showScreen('screen-menu');
+};
+
+renderProblem();
+})();
+</script>
+</body>
+</html>
