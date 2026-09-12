@@ -247,13 +247,17 @@
 
   <!-- CPU DIFFICULTY -->
   <div class="screen" id="screen-cpu-setup">
-    <div class="card">
+    <div class="card" style="max-width:480px;">
       <h1 class="title" style="color:var(--ink); text-shadow:none; font-size:24px;">Choose difficulty</h1>
       <div class="diff-row" id="diff-row">
         <button class="btn btn-green selected" data-diff="easy">Easy</button>
         <button class="btn btn-orange" data-diff="medium">Medium</button>
         <button class="btn btn-red" data-diff="hard">Hard</button>
       </div>
+      <p class="sub" style="margin-bottom:6px;">Pick your character:</p>
+      <div class="character-grid" id="cpu-character-grid"></div>
+      <p class="sub" style="margin-bottom:6px;">Pick a background:</p>
+      <div class="background-row" id="cpu-background-row"></div>
       <button class="btn btn-blue" id="btn-start-cpu">Start Game</button>
       <button class="btn btn-grey" id="btn-cpu-back">Back</button>
     </div>
@@ -392,7 +396,16 @@ const rightTag = document.getElementById('right-tag');
 function setInGameUI(on){
   hud.classList.toggle('active',on);
   backBtn.classList.toggle('active',on);
-  questionPanel.classList.toggle('active',on);
+  // Only ever hide the question panel here, never show it: while "on" is
+  // true during the pre-match countdown, the first real problem hasn't
+  // been generated yet, so showing the panel then would flash whatever
+  // stale problem was left over from the last game. Callers reveal it
+  // explicitly (see showQuestionPanel) once renderProblem() has actually
+  // run, right as the countdown ends.
+  if(!on) questionPanel.classList.remove('active');
+}
+function showQuestionPanel(){
+  questionPanel.classList.add('active');
 }
 
 // ================= GAME STATE =================
@@ -1221,15 +1234,15 @@ function handleWSMessage(m){
   }
 }
 
-// ---------- Lobby (team pick, character pick, roster display, host start) ----------
+// ---------- Character/background pickers (reused by the online lobby AND
+// the CPU-mode setup screen - each gets its own instance/DOM/state, but the
+// same rendering code and preset lists) ----------
 const CHARACTER_LABELS = {
   plain:'Plain', cap:'Cap', bandana:'Bandana', propeller:'Propeller',
   bow:'Bow', mohawk:'Mohawk', glasses:'Glasses', mustache:'Mustache'
 };
-// Each character button shows an actual rendered preview (via the same
-// drawCharacter used in-game) rather than just a text label, so picking one
-// means seeing it, not guessing from a name.
-const charThumbCtx = {}; // character id -> its thumbnail canvas's 2d context
+const BACKGROUND_LABELS = {meadow:'Meadow', desert:'Desert', snow:'Snow', sunset:'Sunset', night:'Night'};
+
 function makeThumbCanvas(w,h){
   const c = document.createElement('canvas');
   const dpr = Math.min(window.devicePixelRatio||1, 2);
@@ -1239,46 +1252,73 @@ function makeThumbCanvas(w,h){
   tctx.setTransform(dpr,0,0,dpr,0,0);
   return {canvas:c, tctx};
 }
-function buildCharacterGrid(){
-  const grid = document.getElementById('character-grid');
+
+// Each character button shows an actual rendered preview (via the same
+// drawCharacter used in-game) rather than just a text label, so picking one
+// means seeing it, not guessing from a name. onPick(characterId) fires on click;
+// call the returned .redraw(color, selectedId, takenSet) after any state change.
+function createCharacterPicker(container, onPick){
+  const thumbCtx = {};
   CHARACTERS.forEach(ch=>{
     const btn = document.createElement('button');
     btn.className = 'char-btn';
     btn.dataset.character = ch;
     const {canvas, tctx} = makeThumbCanvas(64,72);
-    charThumbCtx[ch] = tctx;
+    thumbCtx[ch] = tctx;
     btn.appendChild(canvas);
     const lbl = document.createElement('div');
     lbl.textContent = CHARACTER_LABELS[ch];
     btn.appendChild(lbl);
-    btn.onclick = ()=> wsSend({type:'setCharacter', character:ch});
-    grid.appendChild(btn);
+    btn.onclick = ()=> onPick(ch);
+    container.appendChild(btn);
   });
-  redrawCharacterThumbs('#8a94a3');
+  function redraw(color, selected, takenSet){
+    const previewAnim = {blink:false, bounce:0, lean:0, pullPulse:0};
+    CHARACTERS.forEach(ch=>{
+      thumbCtx[ch].clearRect(0,0,64,72);
+      drawCharacter(thumbCtx[ch], 32, 60, 0.5, color, false, {...previewAnim, character:ch}, null);
+    });
+    container.querySelectorAll('.char-btn').forEach(btn=>{
+      const ch = btn.dataset.character;
+      btn.classList.toggle('selected', ch===selected);
+      btn.classList.toggle('taken', ch!==selected && !!(takenSet && takenSet.has(ch)));
+    });
+  }
+  return {redraw};
 }
-function redrawCharacterThumbs(color){
-  const previewAnim = {blink:false, bounce:0, lean:0, pullPulse:0};
-  CHARACTERS.forEach(ch=>{
-    const tctx = charThumbCtx[ch];
-    tctx.clearRect(0,0,64,72);
-    drawCharacter(tctx, 32, 60, 0.5, color, false, {...previewAnim, character:ch}, null);
-  });
-}
-buildCharacterGrid();
 
-const BACKGROUND_LABELS = {meadow:'Meadow', desert:'Desert', snow:'Snow', sunset:'Sunset', night:'Night'};
-function buildBackgroundRow(){
-  const row = document.getElementById('background-row');
+// onPick(backgroundId) fires on click (caller decides whether the click is
+// actually allowed, e.g. host-only in the online lobby). Call the returned
+// .redraw(selectedId, locked) after any state change.
+function createBackgroundPicker(container, onPick){
   Object.keys(BACKGROUNDS).forEach(id=>{
     const btn = document.createElement('button');
     btn.className = 'bg-btn';
     btn.dataset.background = id;
     btn.textContent = BACKGROUND_LABELS[id] || id;
-    btn.onclick = ()=>{ if(role==='host') wsSend({type:'setBackground', background:id}); };
-    row.appendChild(btn);
+    btn.onclick = ()=> onPick(id);
+    container.appendChild(btn);
   });
+  function redraw(selected, locked){
+    container.querySelectorAll('.bg-btn').forEach(btn=>{
+      btn.classList.toggle('selected', btn.dataset.background===selected);
+      btn.disabled = !!locked;
+    });
+  }
+  return {redraw};
 }
-buildBackgroundRow();
+
+// ---------- Online lobby (team pick, character pick, roster, host start) ----------
+const onlineCharacterPicker = createCharacterPicker(
+  document.getElementById('character-grid'),
+  ch => wsSend({type:'setCharacter', character:ch})
+);
+onlineCharacterPicker.redraw('#8a94a3', null, null);
+
+const onlineBackgroundPicker = createBackgroundPicker(
+  document.getElementById('background-row'),
+  id => { if(role==='host') wsSend({type:'setBackground', background:id}); }
+);
 
 // ---------- Player name ----------
 const nameInput = document.getElementById('name-input');
@@ -1330,7 +1370,6 @@ function renderLobby(){
   const myLobbyCharacter = me ? me.character : null;
   document.getElementById('btn-team-blue').classList.toggle('selected', myLobbyTeam==='blue');
   document.getElementById('btn-team-red').classList.toggle('selected', myLobbyTeam==='red');
-  redrawCharacterThumbs(myLobbyTeam==='red' ? '#e0524a' : myLobbyTeam==='blue' ? '#3a7bd5' : '#8a94a3');
 
   // Dim characters a current teammate already has - a UI hint only, the
   // server is the real enforcer (see "setCharacter" in main.go).
@@ -1339,17 +1378,13 @@ function renderLobby(){
       .filter(p=>myLobbyTeam && p.seat!==mySeat && p.team===myLobbyTeam && p.character)
       .map(p=>p.character)
   );
-  document.querySelectorAll('#character-grid .char-btn').forEach(btn=>{
-    const ch = btn.dataset.character;
-    btn.classList.toggle('selected', ch===myLobbyCharacter);
-    btn.classList.toggle('taken', ch!==myLobbyCharacter && takenByTeammate.has(ch));
-  });
+  onlineCharacterPicker.redraw(
+    myLobbyTeam==='red' ? '#e0524a' : myLobbyTeam==='blue' ? '#3a7bd5' : '#8a94a3',
+    myLobbyCharacter, takenByTeammate
+  );
 
   const currentBg = latestRoster.background || 'meadow';
-  document.querySelectorAll('#background-row .bg-btn').forEach(btn=>{
-    btn.classList.toggle('selected', btn.dataset.background===currentBg);
-    btn.disabled = role!=='host';
-  });
+  onlineBackgroundPicker.redraw(currentBg, role!=='host');
 
   document.getElementById('btn-lobby-start').style.display = role==='host' ? 'block' : 'none';
   document.getElementById('lobby-wait-msg').style.display = role==='host' ? 'none' : 'block';
@@ -1458,6 +1493,7 @@ function beginOnlineGame(m){
     running=true;
     difficulty='medium';
     renderProblem();
+    showQuestionPanel();
   });
 }
 
@@ -1505,7 +1541,8 @@ function startCPUGame(){
   resetGameState();
   mode='cpu';
   mySeat = 0; myTeam = 'blue';
-  leftTeamMembers = [makeCharAnim(0,'plain')];
+  activeBackground = cpuBackground;
+  leftTeamMembers = [makeCharAnim(0,cpuCharacter)];
   rightTeamMembers = [makeCharAnim(1,'plain')];
   updateHudTags();
   showScreen(null);
@@ -1517,6 +1554,7 @@ function startCPUGame(){
   runCountdownThen(startedAt, ()=>{
     running=true;
     renderProblem();
+    showQuestionPanel();
   });
 }
 
@@ -1536,10 +1574,38 @@ function endGame(winnerSide){
   }, 500);
 }
 
+// ---------- CPU setup: character/background pickers (local-only state,
+// persisted so the choice sticks between games) ----------
+let cpuCharacter = localStorage.getItem('tugOfWarCpuCharacter') || 'plain';
+let cpuBackground = localStorage.getItem('tugOfWarCpuBackground') || 'meadow';
+
+const cpuCharacterPicker = createCharacterPicker(
+  document.getElementById('cpu-character-grid'),
+  ch => {
+    cpuCharacter = ch;
+    localStorage.setItem('tugOfWarCpuCharacter', ch);
+    cpuCharacterPicker.redraw('#3a7bd5', cpuCharacter, null);
+  }
+);
+const cpuBackgroundPicker = createBackgroundPicker(
+  document.getElementById('cpu-background-row'),
+  id => {
+    cpuBackground = id;
+    localStorage.setItem('tugOfWarCpuBackground', id);
+    activeBackground = id; // live preview, same as the online lobby
+    cpuBackgroundPicker.redraw(cpuBackground, false);
+  }
+);
+
 // ---------- Button wiring ----------
-document.getElementById('btn-vs-cpu').onclick = ()=> showScreen('screen-cpu-setup');
+document.getElementById('btn-vs-cpu').onclick = ()=>{
+  showScreen('screen-cpu-setup');
+  activeBackground = cpuBackground;
+  cpuCharacterPicker.redraw('#3a7bd5', cpuCharacter, null);
+  cpuBackgroundPicker.redraw(cpuBackground, false);
+};
 document.getElementById('btn-vs-friend').onclick = ()=> showScreen('screen-friend-menu');
-document.getElementById('btn-cpu-back').onclick = ()=> showScreen('screen-menu');
+document.getElementById('btn-cpu-back').onclick = ()=>{ activeBackground='meadow'; showScreen('screen-menu'); };
 document.getElementById('btn-friend-back').onclick = ()=> showScreen('screen-menu');
 
 document.getElementById('diff-row').addEventListener('click',(e)=>{
