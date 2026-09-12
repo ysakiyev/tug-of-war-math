@@ -29,7 +29,7 @@
      the real viewport, so every device renders identical relative
      proportions instead of recomputing layout per screen size. */
   #stage{position:absolute; top:0; left:0; width:1600px; height:900px; transform-origin:0 0;}
-  canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  #game{position:absolute; inset:0; width:100%; height:100%; display:block;}
 
   .screen{
     position:absolute; inset:0; display:none;
@@ -92,6 +92,11 @@
     font-size:28px; font-weight:900; letter-spacing:6px; text-align:center;
     width:100%; padding:12px; border-radius:14px; border:3px solid #ccc;
     margin:14px 0; text-transform:uppercase; font-family:inherit;
+  }
+  .name-input{
+    font-size:16px; font-weight:800; text-align:center; color:var(--ink);
+    width:100%; padding:10px; border-radius:12px; border:3px solid #ccc;
+    margin:0 0 14px; font-family:inherit;
   }
   .hint{font-size:13px; color:#7a6a5a; margin-top:-6px; margin-bottom:14px;}
   .spinner{
@@ -169,6 +174,40 @@
   .result-emoji{font-size:64px; margin-bottom:6px;}
   .result-title{font-size:28px; font-weight:900; margin:0 0 6px;}
   .result-sub{font-size:14px; color:#5a4636; margin:0 0 18px; font-weight:700;}
+
+  /* lobby */
+  #lobby-roster{margin:10px 0 16px;}
+  .lobby-row{
+    display:flex; align-items:center; justify-content:space-between;
+    background:#fff; border-radius:12px; padding:10px 14px; margin-bottom:8px;
+    font-weight:800; font-size:14px; color:var(--ink);
+  }
+  .lobby-row.me{outline:3px solid var(--accent);}
+  .team-pill{font-size:12px; font-weight:900; color:#fff; padding:4px 10px; border-radius:10px;}
+  .team-pill.blue{background:var(--blue-team);}
+  .team-pill.red{background:var(--red-team);}
+  .team-pill.none{background:#aab0bb;}
+
+  .character-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px;}
+  .char-btn{
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    background:linear-gradient(180deg,#fff,#f0eee4); border:3px solid #fff; border-radius:14px;
+    padding:4px 2px 6px; font-size:10px; font-weight:800; color:var(--ink); font-family:inherit;
+    box-shadow:0 3px 0 rgba(0,0,0,0.12);
+  }
+  .char-btn canvas{display:block; pointer-events:none;}
+  .char-btn.selected{outline:3px solid #2c3e50; transform:scale(1.04);}
+  .char-btn.taken{opacity:0.4;}
+
+  .background-row{display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;}
+  .bg-btn{
+    flex:1; min-width:70px; background:linear-gradient(180deg,#fff,#f0eee4);
+    border:3px solid #fff; border-radius:14px; padding:8px 4px;
+    font-size:11px; font-weight:800; color:var(--ink); font-family:inherit;
+    box-shadow:0 3px 0 rgba(0,0,0,0.12);
+  }
+  .bg-btn.selected{outline:3px solid #2c3e50; transform:scale(1.04);}
+  .bg-btn:disabled{opacity:0.55;}
 </style>
 </head>
 <body>
@@ -231,18 +270,26 @@
     </div>
   </div>
 
-  <!-- HOST WAITING -->
-  <div class="screen" id="screen-host">
-    <div class="card">
-      <h1 class="title" style="color:var(--ink); text-shadow:none; font-size:22px;">Your room code</h1>
-      <div class="code-display" id="host-code">A1B2</div>
-      <p class="hint">Tell your friend to tap "Join with a Code" and enter this.</p>
-      <div id="host-status">
-        <div class="spinner"></div>
-        <p class="sub" style="margin-bottom:0;">Waiting for a friend to join…</p>
+  <!-- LOBBY (host + all joined players land here, up to 4 total) -->
+  <div class="screen" id="screen-lobby">
+    <div class="card" style="max-width:480px;">
+      <h1 class="title" style="color:var(--ink); text-shadow:none; font-size:22px;">Room <span id="lobby-code">----</span></h1>
+      <p class="hint" id="lobby-hint">Share this code so up to 3 others can join.</p>
+      <p class="sub" style="margin-bottom:6px;">Your name:</p>
+      <input class="name-input" id="name-input" maxlength="20" placeholder="Type your name">
+      <div id="lobby-roster"></div>
+      <p class="sub" style="margin-bottom:6px;">Pick your team:</p>
+      <div class="diff-row">
+        <button class="btn btn-blue" id="btn-team-blue">Team Blue</button>
+        <button class="btn btn-red" id="btn-team-red">Team Red</button>
       </div>
-      <button class="btn btn-blue" id="btn-host-start" style="display:none;">Start Game</button>
-      <button class="btn btn-grey" id="btn-host-cancel">Cancel</button>
+      <p class="sub" style="margin-bottom:6px;">Pick your character:</p>
+      <div class="character-grid" id="character-grid"></div>
+      <p class="sub" style="margin-bottom:6px;">Background (host picks):</p>
+      <div class="background-row" id="background-row"></div>
+      <button class="btn btn-green" id="btn-lobby-start" style="display:none;">Start Game</button>
+      <p class="sub" id="lobby-wait-msg" style="display:none; margin-bottom:14px;">Waiting for host to start…</p>
+      <button class="btn btn-grey" id="btn-lobby-back">Leave</button>
     </div>
   </div>
 
@@ -356,13 +403,29 @@ let mode = null;            // 'cpu' | 'online'
 let running = false;
 let pos = 0;                 // visual authoritative-ish position (renderer target)
 let visualPos = 0;           // smoothed for rendering
-let leftScore = 0, rightScore = 0;
-let leftLabel = 'You', rightLabel = 'CPU';
+let leftScore = 0, rightScore = 0; // team totals (blue/red), not per-player
 let difficulty = 'easy';
 let currentProblem = null;
 let cpuProblem = null;
-let opponentProblemText = '';
+let leftBubbleText = '', rightBubbleText = ''; // one shared bubble per side
 let gameOverHandled = false;
+
+// Which seat/team am I. mySeat is stable for the whole room connection;
+// myTeam is only meaningful once a match has started (frozen from the
+// server's "start" roster).
+let mySeat = null;
+let myTeam = null;
+let matchPlayers = []; // frozen [{seat,team,character}] from the "start" message
+
+function updateHudTags(){
+  if(mode==='cpu'){
+    leftTag.textContent = 'You';
+    rightTag.textContent = 'CPU (' + difficulty[0].toUpperCase() + difficulty.slice(1) + ')';
+  } else {
+    leftTag.textContent = 'Team Blue';
+    rightTag.textContent = 'Team Red';
+  }
+}
 
 // particles
 let particles = [];
@@ -437,8 +500,17 @@ function drawConfetti(){
 }
 
 // ---------- Character animation state ----------
-const leftChar = {bounce:0, blinkT:rand(1,4), blink:false, lean:0, pullPulse:0};
-const rightChar = {bounce:0, blinkT:rand(1,4), blink:false, lean:0, pullPulse:0};
+// One team = one array of these, one entry per seated player (1-3 per
+// side). Populated at match start from the frozen roster (see buildTeams).
+let leftTeamMembers = [];
+let rightTeamMembers = [];
+function makeCharAnim(seat, character){
+  return {seat, character, bounce:0, blinkT:rand(1,4), blink:false, lean:0, pullPulse:0};
+}
+function buildTeams(players){
+  leftTeamMembers = players.filter(p=>p.team==='blue').map(p=>makeCharAnim(p.seat, p.character));
+  rightTeamMembers = players.filter(p=>p.team==='red').map(p=>makeCharAnim(p.seat, p.character));
+}
 
 function updateChar(c,dt,winning){
   c.bounce += dt*(winning?5:3.2);
@@ -448,98 +520,245 @@ function updateChar(c,dt,winning){
   c.pullPulse = Math.max(0, c.pullPulse - dt*3);
 }
 
-function drawCharacter(x,y,scale,color,mirror,c,label){
-  ctx.save();
-  ctx.translate(x,y);
-  // shadow
-  ctx.save();
-  ctx.translate(0, 62*scale); ctx.scale(1,0.28);
-  ctx.beginPath(); ctx.arc(0,0,34*scale,0,Math.PI*2);
-  ctx.fillStyle='rgba(30,20,10,0.28)'; ctx.fill();
-  ctx.restore();
+// ---------- Character accessories (the "character" pick) ----------
+// Every character is the same base body/limbs; the accessory is what makes
+// each pick recognizable. Called from inside drawCharacter's head block
+// (already translated to head-local coordinates). Most accessories replace
+// the old plain headband; "glasses" instead draws after the eyes/mouth so
+// the frames sit on top of the face, not underneath it.
+const CHARACTERS = ['plain','cap','bandana','propeller','bow','mohawk','glasses','mustache'];
 
-  ctx.scale(mirror?-1:1,1);
-  ctx.rotate(c.lean*(mirror?-1:1));
+// ---------- Backgrounds (the shared scene pick) ----------
+const BACKGROUNDS = {
+  meadow: {skyTop:'#5fb8f5', skyBottom:'#cdeeff', grassTop:'#7bcf52', grassBottom:'#4a9a30',
+    pitCore:'#5a3a20', hazard:'#caa24a', celestial:'sun', celestialColor:'#ffe066', decor:'clouds'},
+  desert: {skyTop:'#7fd6e8', skyBottom:'#ffe9b8', grassTop:'#e8c778', grassBottom:'#c99a4a',
+    pitCore:'#8a6a3a', hazard:'#e0b060', celestial:'sun', celestialColor:'#ffcf4d', decor:'cactus'},
+  snow: {skyTop:'#bcdff5', skyBottom:'#eef7fb', grassTop:'#f2f7fa', grassBottom:'#d8e8ee',
+    pitCore:'#6a8a9a', hazard:'#9fc4d4', celestial:'sun', celestialColor:'#fff6d8', decor:'snow'},
+  sunset: {skyTop:'#5a5ba0', skyBottom:'#ff9a6a', grassTop:'#d9a05a', grassBottom:'#a86a3a',
+    pitCore:'#5a3a20', hazard:'#caa24a', celestial:'sun', celestialColor:'#ffb15e', decor:'palm'},
+  night: {skyTop:'#0c1638', skyBottom:'#2c3a66', grassTop:'#2a3a2a', grassBottom:'#182818',
+    pitCore:'#3a2a5a', hazard:'#7a5aa0', celestial:'moon', celestialColor:'#e8ecf5', decor:'stars'},
+};
+let activeBackground = 'meadow';
+function bg(){ return BACKGROUNDS[activeBackground] || BACKGROUNDS.meadow; }
+// Both accessory drawers take an explicit context (g) rather than closing
+// over the main game canvas's `ctx`, so the same drawing code can render
+// either into the live game canvas or into a small lobby preview thumbnail.
+function drawHeadAccessoryBack(g, character, color, scale){
+  switch(character){
+    case 'cap':
+      g.fillStyle = shadeColor(color,-10);
+      g.beginPath(); g.arc(0,-4*scale,24*scale,Math.PI*1.0,Math.PI*2.02); g.closePath(); g.fill();
+      g.fillStyle = shadeColor(color,-25);
+      g.beginPath(); g.ellipse(15*scale,-3*scale,12*scale,4*scale,0.1,0,6.28); g.fill();
+      break;
+    case 'bandana':
+      g.fillStyle = shadeColor(color,-10);
+      g.beginPath(); g.arc(0,-2*scale,25*scale,Math.PI*1.05,Math.PI*1.95); g.lineTo(18*scale,-14*scale); g.lineTo(-18*scale,-14*scale); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(19*scale,-9*scale); g.lineTo(29*scale,-3*scale); g.lineTo(22*scale,3*scale); g.closePath(); g.fill();
+      break;
+    case 'propeller':
+      g.fillStyle = shadeColor(color,-10);
+      g.beginPath(); g.arc(0,-6*scale,23*scale,Math.PI,Math.PI*2); g.fill();
+      g.strokeStyle='#5a4636'; g.lineWidth=2.5*scale;
+      g.beginPath(); g.moveTo(0,-29*scale); g.lineTo(0,-37*scale); g.stroke();
+      g.fillStyle='#e8e8e8';
+      g.save(); g.translate(0,-37*scale);
+      g.beginPath(); g.ellipse(0,0,10*scale,3*scale,0,0,6.28); g.fill();
+      g.beginPath(); g.ellipse(0,0,3*scale,10*scale,0,0,6.28); g.fill();
+      g.restore();
+      break;
+    case 'mohawk':
+      g.fillStyle = shadeColor(color,-10);
+      for(let i=-2;i<=2;i++){
+        const bx = i*6*scale, h = 12*scale+Math.abs(i)*-2*scale;
+        g.beginPath();
+        g.moveTo(bx-3*scale,-20*scale);
+        g.lineTo(bx,-20*scale-h);
+        g.lineTo(bx+3*scale,-20*scale);
+        g.closePath(); g.fill();
+      }
+      break;
+    case 'bow':
+      g.fillStyle = shadeColor(color,-5);
+      g.save(); g.translate(17*scale,-18*scale);
+      g.beginPath(); g.moveTo(0,0); g.lineTo(10*scale,-6*scale); g.lineTo(10*scale,6*scale); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(0,0); g.lineTo(-10*scale,-6*scale); g.lineTo(-10*scale,6*scale); g.closePath(); g.fill();
+      g.fillStyle = shadeColor(color,-35);
+      g.beginPath(); g.arc(0,0,3*scale,0,6.28); g.fill();
+      g.restore();
+      break;
+    case 'mustache':
+      g.fillStyle = shadeColor(color,-10);
+      g.beginPath(); g.arc(0,-2*scale,25*scale,Math.PI*1.08,Math.PI*1.92); g.lineTo(20*scale,-16*scale); g.lineTo(-20*scale,-16*scale); g.closePath(); g.fill();
+      break;
+    case 'glasses':
+      break; // drawn in drawHeadAccessoryFront, on top of the eyes
+    case 'plain':
+    default:
+      g.fillStyle = shadeColor(color,-10);
+      g.beginPath(); g.arc(0,-2*scale,25*scale,Math.PI*1.08,Math.PI*1.92); g.lineTo(20*scale,-16*scale); g.lineTo(-20*scale,-16*scale); g.closePath(); g.fill();
+      break;
+  }
+}
+function drawHeadAccessoryFront(g, character, scale){
+  if(character==='glasses'){
+    g.strokeStyle='#2c2c2c'; g.lineWidth=2.2*scale;
+    g.beginPath(); g.arc(-8*scale,-1*scale,7*scale,0,6.28); g.stroke();
+    g.beginPath(); g.arc(9*scale,-1*scale,7*scale,0,6.28); g.stroke();
+    g.beginPath(); g.moveTo(-1*scale,-1*scale); g.lineTo(2*scale,-1*scale); g.stroke();
+  } else if(character==='mustache'){
+    g.fillStyle='#5a3a26';
+    g.beginPath();
+    g.moveTo(-11*scale,6*scale);
+    g.quadraticCurveTo(-4*scale,2*scale,0,5*scale);
+    g.quadraticCurveTo(4*scale,2*scale,11*scale,6*scale);
+    g.quadraticCurveTo(4*scale,10*scale,0,7*scale);
+    g.quadraticCurveTo(-4*scale,10*scale,-11*scale,6*scale);
+    g.closePath(); g.fill();
+  }
+}
+
+// Takes an explicit context (g) instead of closing over the game canvas's
+// `ctx`, so the exact same character art can render into the live game
+// canvas or into a small lobby preview thumbnail.
+function drawCharacter(g,x,y,scale,color,mirror,c,label){
+  g.save();
+  g.translate(x,y);
+  // shadow
+  g.save();
+  g.translate(0, 62*scale); g.scale(1,0.28);
+  g.beginPath(); g.arc(0,0,34*scale,0,Math.PI*2);
+  g.fillStyle='rgba(30,20,10,0.28)'; g.fill();
+  g.restore();
+
+  g.scale(mirror?-1:1,1);
+  g.rotate(c.lean*(mirror?-1:1));
   const bob = Math.sin(c.bounce)*3.2*scale;
-  ctx.translate(0,bob);
+  g.translate(0,bob);
 
   // back leg
-  ctx.strokeStyle = shadeColor(color,-35); ctx.lineWidth=11*scale; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(6*scale,26*scale); ctx.lineTo(22*scale,54*scale); ctx.stroke();
-  // back arm reaching to rope (drawn behind body)
-  ctx.strokeStyle = '#f3c89a'; ctx.lineWidth=9*scale;
-  ctx.beginPath(); ctx.moveTo(-14*scale,-2*scale); ctx.lineTo(-40*scale, 4*scale+Math.sin(c.bounce*2)*2*scale); ctx.stroke();
+  g.strokeStyle = shadeColor(color,-35); g.lineWidth=11*scale; g.lineCap='round';
+  g.beginPath(); g.moveTo(6*scale,26*scale); g.lineTo(22*scale,54*scale); g.stroke();
+  // back arm reaching to rope (drawn behind body). The rope sits on the
+  // character's centerward side (e.g. a left-team member is drawn just
+  // outside the rope's actual endpoint), so both arms reach toward positive
+  // local x - toward the rope - not away from it.
+  g.strokeStyle = '#f3c89a'; g.lineWidth=9*scale;
+  g.beginPath(); g.moveTo(14*scale,-2*scale); g.lineTo(40*scale, 4*scale+Math.sin(c.bounce*2)*2*scale); g.stroke();
 
   // body
-  const grad = ctx.createLinearGradient(0,-34*scale,0,28*scale);
+  const grad = g.createLinearGradient(0,-34*scale,0,28*scale);
   grad.addColorStop(0, shadeColor(color,18));
   grad.addColorStop(1, color);
-  ctx.fillStyle = grad;
-  roundRectPath(ctx,-27*scale,-32*scale,54*scale,58*scale,20*scale);
-  ctx.fill();
-  ctx.lineWidth=3; ctx.strokeStyle=shadeColor(color,-40); ctx.stroke();
+  g.fillStyle = grad;
+  roundRectPath(g,-27*scale,-32*scale,54*scale,58*scale,20*scale);
+  g.fill();
+  g.lineWidth=3; g.strokeStyle=shadeColor(color,-40); g.stroke();
   // belt
-  ctx.fillStyle = shadeColor(color,-45);
-  ctx.fillRect(-27*scale, 14*scale, 54*scale, 7*scale);
+  g.fillStyle = shadeColor(color,-45);
+  g.fillRect(-27*scale, 14*scale, 54*scale, 7*scale);
 
   // front leg
-  ctx.strokeStyle = shadeColor(color,-20); ctx.lineWidth=11*scale;
-  ctx.beginPath(); ctx.moveTo(-6*scale,26*scale); ctx.lineTo(-24*scale,54*scale); ctx.stroke();
+  g.strokeStyle = shadeColor(color,-20); g.lineWidth=11*scale;
+  g.beginPath(); g.moveTo(-6*scale,26*scale); g.lineTo(-24*scale,54*scale); g.stroke();
   // foot
-  ctx.fillStyle = '#5a4636';
-  ctx.beginPath(); ctx.ellipse(-26*scale,55*scale,10*scale,5*scale,0.3,0,6.28); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(24*scale,55*scale,10*scale,5*scale,-0.3,0,6.28); ctx.fill();
+  g.fillStyle = '#5a4636';
+  g.beginPath(); g.ellipse(-26*scale,55*scale,10*scale,5*scale,0.3,0,6.28); g.fill();
+  g.beginPath(); g.ellipse(24*scale,55*scale,10*scale,5*scale,-0.3,0,6.28); g.fill();
 
   // front arm gripping rope
   const armPunch = 1+c.pullPulse*0.4;
-  ctx.strokeStyle = '#f3c89a'; ctx.lineWidth=10*scale*armPunch;
-  ctx.beginPath(); ctx.moveTo(-16*scale,-6*scale); ctx.lineTo(-46*scale*armPunch,-8*scale); ctx.stroke();
+  g.strokeStyle = '#f3c89a'; g.lineWidth=10*scale*armPunch;
+  g.beginPath(); g.moveTo(16*scale,-6*scale); g.lineTo(46*scale*armPunch,-8*scale); g.stroke();
   // hand
-  ctx.fillStyle = '#f3c89a';
-  ctx.beginPath(); ctx.arc(-46*scale*armPunch,-8*scale,7*scale,0,6.28); ctx.fill();
+  g.fillStyle = '#f3c89a';
+  g.beginPath(); g.arc(46*scale*armPunch,-8*scale,7*scale,0,6.28); g.fill();
 
   // head
-  ctx.save(); ctx.translate(0,-46*scale);
-  const hg = ctx.createRadialGradient(-8*scale,-8*scale,4,0,0,27*scale);
+  g.save(); g.translate(0,-46*scale);
+  const hg = g.createRadialGradient(-8*scale,-8*scale,4,0,0,27*scale);
   hg.addColorStop(0,'#ffe3c2'); hg.addColorStop(1,'#f2c093');
-  ctx.fillStyle = hg;
-  ctx.beginPath(); ctx.arc(0,0,25*scale,0,6.28); ctx.fill();
+  g.fillStyle = hg;
+  g.beginPath(); g.arc(0,0,25*scale,0,6.28); g.fill();
 
-  // headband
-  ctx.fillStyle = shadeColor(color,-10);
-  ctx.beginPath(); ctx.arc(0,-2*scale,25*scale,Math.PI*1.08,Math.PI*1.92); ctx.lineTo(20*scale,-16*scale); ctx.lineTo(-20*scale,-16*scale); ctx.closePath(); ctx.fill();
+  // head accessory (character pick) - drawn where the headband used to be;
+  // "glasses" draws on top of the eyes instead, see below.
+  drawHeadAccessoryBack(g, c.character, color, scale);
 
   if(!c.blink){
-    ctx.fillStyle='#2c2c2c';
-    ctx.beginPath(); ctx.arc(-8*scale,-1*scale,3.6*scale,0,6.28); ctx.fill();
-    ctx.beginPath(); ctx.arc(9*scale,-1*scale,3.6*scale,0,6.28); ctx.fill();
-    ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.arc(-6.5*scale,-2.5*scale,1.2*scale,0,6.28); ctx.fill();
-    ctx.beginPath(); ctx.arc(10.5*scale,-2.5*scale,1.2*scale,0,6.28); ctx.fill();
+    g.fillStyle='#2c2c2c';
+    g.beginPath(); g.arc(-8*scale,-1*scale,3.6*scale,0,6.28); g.fill();
+    g.beginPath(); g.arc(9*scale,-1*scale,3.6*scale,0,6.28); g.fill();
+    g.fillStyle='#fff';
+    g.beginPath(); g.arc(-6.5*scale,-2.5*scale,1.2*scale,0,6.28); g.fill();
+    g.beginPath(); g.arc(10.5*scale,-2.5*scale,1.2*scale,0,6.28); g.fill();
   } else {
-    ctx.strokeStyle='#2c2c2c'; ctx.lineWidth=2.4*scale; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(-12*scale,-1*scale); ctx.lineTo(-4*scale,-1*scale); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(5*scale,-1*scale); ctx.lineTo(13*scale,-1*scale); ctx.stroke();
+    g.strokeStyle='#2c2c2c'; g.lineWidth=2.4*scale; g.lineCap='round';
+    g.beginPath(); g.moveTo(-12*scale,-1*scale); g.lineTo(-4*scale,-1*scale); g.stroke();
+    g.beginPath(); g.moveTo(5*scale,-1*scale); g.lineTo(13*scale,-1*scale); g.stroke();
   }
   // cheeks
-  ctx.fillStyle='rgba(230,110,100,0.35)';
-  ctx.beginPath(); ctx.arc(-14*scale,7*scale,4*scale,0,6.28); ctx.fill();
-  ctx.beginPath(); ctx.arc(15*scale,7*scale,4*scale,0,6.28); ctx.fill();
+  g.fillStyle='rgba(230,110,100,0.35)';
+  g.beginPath(); g.arc(-14*scale,7*scale,4*scale,0,6.28); g.fill();
+  g.beginPath(); g.arc(15*scale,7*scale,4*scale,0,6.28); g.fill();
   // mouth - effort grimace
-  ctx.strokeStyle='#8a4a3a'; ctx.lineWidth=2.4*scale; ctx.lineCap='round';
-  ctx.beginPath(); ctx.arc(0,11*scale,6*scale,0.15*Math.PI,0.85*Math.PI); ctx.stroke();
-  ctx.restore(); // head
+  g.strokeStyle='#8a4a3a'; g.lineWidth=2.4*scale; g.lineCap='round';
+  g.beginPath(); g.arc(0,11*scale,6*scale,0.15*Math.PI,0.85*Math.PI); g.stroke();
+  drawHeadAccessoryFront(g, c.character, scale);
+  g.restore(); // head
 
-  ctx.restore(); // full char transform
+  g.restore(); // full char transform
 
-  // label (not mirrored/rotated)
+  // label (not mirrored/rotated) - only drawn when one is given; with up to
+  // 3 characters per side a per-seat label would be too cluttered, so
+  // in-game callers pass null and rely on the HUD's team tags instead.
+  if(label){
+    g.save();
+    g.font = `900 ${13*scale}px -apple-system, sans-serif`;
+    g.textAlign='center';
+    g.fillStyle='rgba(0,0,0,0.55)';
+    g.fillText(label, x, y+80*scale+1);
+    g.fillStyle='#fff';
+    g.fillText(label, x, y+80*scale);
+    g.restore();
+  }
+}
+
+// ---------- Multi-player-per-side layout ----------
+// Offsets (away from the rope anchor) and scale for however many players
+// are on one side, so 1-3 teammates fan out instead of overlapping.
+const TEAM_OFFSETS = {
+  1: [{d:0, scale:1.05}],
+  2: [{d:0, scale:1.05}, {d:50, scale:0.95}],
+  3: [{d:0, scale:1.05}, {d:46, scale:0.95}, {d:88, scale:0.87}],
+};
+function drawTeam(members, baseX, dirSign, mirror, color, groundY){
+  const offs = TEAM_OFFSETS[members.length] || TEAM_OFFSETS[3];
+  for(let i=members.length-1;i>=0;i--){
+    const o = offs[i] || offs[offs.length-1];
+    const x = baseX + dirSign*o.d;
+    const y = groundY-4;
+    drawCharacter(ctx, x, y, o.scale, color, mirror, members[i], null);
+    if(members[i].seat===mySeat) drawYouMarker(x, y, o.scale);
+  }
+}
+function drawYouMarker(x,y,scale){
   ctx.save();
-  ctx.font = `900 ${13*scale}px -apple-system, sans-serif`;
-  ctx.textAlign='center';
-  ctx.fillStyle='rgba(0,0,0,0.55)';
-  ctx.fillText(label, x, y+80*scale+1);
-  ctx.fillStyle='#fff';
-  ctx.fillText(label, x, y+80*scale);
+  ctx.translate(x, y-118*scale);
+  ctx.fillStyle='#ffd23f';
+  ctx.strokeStyle='#7a4a2a'; ctx.lineWidth=2;
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const a = i*2*Math.PI/5 - Math.PI/2;
+    const r = 11*scale;
+    ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+    const a2 = a + Math.PI/5;
+    ctx.lineTo(Math.cos(a2)*(r*0.45), Math.sin(a2)*(r*0.45));
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore();
 }
 
@@ -591,27 +810,32 @@ function drawScene(dt){
   ctx.translate(ox,oy);
 
   const groundY = H*0.66;
+  const theme = bg();
 
   // sky
   const skyGrad = ctx.createLinearGradient(0,0,0,groundY);
-  skyGrad.addColorStop(0,'#5fb8f5');
-  skyGrad.addColorStop(1,'#cdeeff');
+  skyGrad.addColorStop(0,theme.skyTop);
+  skyGrad.addColorStop(1,theme.skyBottom);
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0,0,W,groundY+2);
 
-  // sun
-  ctx.fillStyle = '#ffe066';
+  // sun or moon
+  ctx.fillStyle = theme.celestialColor;
   ctx.beginPath(); ctx.arc(W*0.85, H*0.14, 40, 0, 6.28); ctx.fill();
+  if(theme.celestial==='moon'){
+    // crescent: knock a bite out of the disc using the sky color
+    ctx.fillStyle = theme.skyTop;
+    ctx.beginPath(); ctx.arc(W*0.85+14, H*0.14-8, 34, 0, 6.28); ctx.fill();
+  }
 
-  // clouds
+  // sky decor (theme-specific: clouds, cactus, snowfall, palm, stars)
   const t = performance.now()/1000;
-  drawCloud(W*0.15 + Math.sin(t*0.05)*20, H*0.12, 1);
-  drawCloud(W*0.55 + Math.sin(t*0.04+2)*20, H*0.20, 0.7);
+  drawSkyDecor(theme.decor, t);
 
   // grass
   const grassGrad = ctx.createLinearGradient(0,groundY,0,H);
-  grassGrad.addColorStop(0,'#7bcf52');
-  grassGrad.addColorStop(1,'#4a9a30');
+  grassGrad.addColorStop(0,theme.grassTop);
+  grassGrad.addColorStop(1,theme.grassBottom);
   ctx.fillStyle = grassGrad;
   ctx.fillRect(0,groundY,W,H-groundY);
 
@@ -621,13 +845,13 @@ function drawScene(dt){
   function mudPit(dirSign){
     const px = cx + dirSign*W*0.42;
     const grad = ctx.createRadialGradient(px,groundY+34,4,px,groundY+34,70);
-    grad.addColorStop(0,'#5a3a20'); grad.addColorStop(1,'rgba(90,58,32,0)');
+    grad.addColorStop(0,theme.pitCore); grad.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=grad;
     ctx.beginPath(); ctx.ellipse(px,groundY+30,80,26,0,0,6.28); ctx.fill();
     // hazard stripes
     ctx.save();
     ctx.beginPath(); ctx.ellipse(px,groundY+22,60,14,0,0,6.28); ctx.clip();
-    ctx.fillStyle='#caa24a';
+    ctx.fillStyle=theme.hazard;
     for(let i=-4;i<5;i++){
       ctx.save(); ctx.translate(px+i*20,groundY+22); ctx.rotate(0.6);
       ctx.fillRect(-4,-30,7,60); ctx.restore();
@@ -677,23 +901,13 @@ function drawScene(dt){
   ctx.fillStyle='#c98a4b';
   ctx.beginPath(); ctx.arc(knotX,knotY,7,0,6.28); ctx.fill();
 
-  // characters
-  const leaningLeft = visualPos < -2;
-  const leaningRight = visualPos > 2;
-  drawCharacter(leftX-24, groundY-4, 1.05, '#3a7bd5', false, leftChar, leftLabel);
-  drawCharacter(rightX+24, groundY-4, 1.05, '#e0524a', true, rightChar, rightLabel);
+  // characters (1-3 per side)
+  drawTeam(leftTeamMembers, leftX-24, -1, false, '#3a7bd5', groundY);
+  drawTeam(rightTeamMembers, rightX+24, 1, true, '#e0524a', groundY);
 
   if(running){
-    // Host/CPU-mode "you" is drawn on the left; the guest is drawn on the
-    // right (see beginOnlineGame), so bubble sides must follow the same
-    // rule instead of always assuming "left" is the local player.
-    const myText = currentProblem ? currentProblem.text : '';
-    const oppText = mode==='cpu' ? (cpuProblem?cpuProblem.text:'') : opponentProblemText;
-    const iAmGuest = mode==='online' && role==='guest';
-    const leftText = iAmGuest ? oppText : myText;
-    const rightText = iAmGuest ? myText : oppText;
-    drawBubble(leftX-24, groundY-4-98, leftText, '#3a7bd5');
-    drawBubble(rightX+24, groundY-4-98, rightText, '#e0524a');
+    drawBubble(leftX-24, groundY-4-98, leftBubbleText, '#3a7bd5');
+    drawBubble(rightX+24, groundY-4-98, rightBubbleText, '#e0524a');
   }
 
   drawParticles();
@@ -714,6 +928,71 @@ function drawCloud(x,y,s){
   ctx.restore();
 }
 
+function drawCactus(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.fillStyle = '#3f9142';
+  roundRectPath(ctx,-8,-70,16,80,8); ctx.fill();
+  roundRectPath(ctx,-26,-40,16,14,7); ctx.fill();
+  roundRectPath(ctx,10,-52,16,14,7); ctx.fill();
+  ctx.restore();
+}
+function drawPalm(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.strokeStyle='#8a6a3a'; ctx.lineWidth=8; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,20); ctx.quadraticCurveTo(-10,-30,0,-60); ctx.stroke();
+  ctx.fillStyle='#3f9142';
+  for(let i=0;i<5;i++){
+    const a = i*(Math.PI*2/5) - Math.PI/2;
+    ctx.save(); ctx.translate(0,-60); ctx.rotate(a);
+    ctx.beginPath(); ctx.ellipse(20,0,26,9,0,0,6.28); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+let starField = null;
+function drawStars(t){
+  if(!starField){
+    starField = [];
+    for(let i=0;i<60;i++) starField.push({x:rand(0,1), y:rand(0,0.5), r:rand(1,2.4), tw:rand(0,10)});
+  }
+  ctx.fillStyle='#fff';
+  starField.forEach(s=>{
+    ctx.globalAlpha = clamp(0.5 + 0.5*Math.sin(t*2+s.tw), 0.2, 1);
+    ctx.beginPath(); ctx.arc(s.x*W, s.y*H, s.r, 0, 6.28); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+let snowField = null;
+function drawSnowfall(t){
+  if(!snowField){
+    snowField = [];
+    for(let i=0;i<40;i++) snowField.push({x:rand(0,1), y:rand(0,1), r:rand(2,4), speed:rand(20,50), drift:rand(-10,10)});
+  }
+  ctx.fillStyle='rgba(255,255,255,0.85)';
+  snowField.forEach(s=>{
+    const y = ((s.y*H + t*s.speed) % H + H) % H;
+    const x = ((s.x*W + Math.sin(t+s.y*10)*s.drift) % W + W) % W;
+    ctx.beginPath(); ctx.arc(x, y, s.r, 0, 6.28); ctx.fill();
+  });
+}
+function drawSkyDecor(decor, t){
+  if(decor==='cactus'){
+    drawCactus(W*0.12, H*0.60, 1);
+    drawCactus(W*0.52, H*0.63, 0.7);
+  } else if(decor==='palm'){
+    drawPalm(W*0.14, H*0.5, 1);
+    drawPalm(W*0.54, H*0.55, 0.75);
+  } else if(decor==='stars'){
+    drawStars(t);
+  } else if(decor==='snow'){
+    drawCloud(W*0.15 + Math.sin(t*0.05)*20, H*0.12, 1);
+    drawSnowfall(t);
+  } else {
+    drawCloud(W*0.15 + Math.sin(t*0.05)*20, H*0.12, 1);
+    drawCloud(W*0.55 + Math.sin(t*0.04+2)*20, H*0.20, 0.7);
+  }
+}
+
 // ---------- Main loop ----------
 let lastT = performance.now();
 function loop(now){
@@ -721,8 +1000,8 @@ function loop(now){
   lastT = now;
 
   visualPos = lerp(visualPos, pos, clamp(dt*6,0,1));
-  updateChar(leftChar, dt, visualPos<0);
-  updateChar(rightChar, dt, visualPos>0);
+  leftTeamMembers.forEach(c=>updateChar(c, dt, visualPos<0));
+  rightTeamMembers.forEach(c=>updateChar(c, dt, visualPos>0));
   updateParticles(dt);
 
   if(screens['screen-result'].classList.contains('active')){
@@ -780,6 +1059,7 @@ function renderProblem(){
     btn.classList.remove('correct','wrong');
     btn.disabled=false;
   });
+  if(myTeam==='red') rightBubbleText = currentProblem.text; else leftBubbleText = currentProblem.text;
   if(mode==='online') syncOnlineState();
 }
 
@@ -812,43 +1092,45 @@ let cpuTimer = 0;
 function cpuAccuracy(){ return difficulty==='easy'?0.45:difficulty==='medium'?0.65:0.85; }
 function cpuInterval(){ return difficulty==='easy'?rand(1.6,2.6):difficulty==='medium'?rand(1.1,1.9):rand(0.7,1.3); }
 
-function onLocalCorrect(){
-  // Host and CPU-mode players are drawn on the left; the guest is drawn on
-  // the right (see beginOnlineGame). A local correct answer must pull the
-  // rope toward whichever side is actually "you" on this client.
-  const groundY = H*0.66;
-  if(mode==='online' && role==='guest'){
+// Pulls the rope one PULL_STEP toward team's side and pulses whichever
+// teammate scored (falls back to pulsing the whole side if seat is
+// unknown/absent, e.g. a stray late message about someone who just left).
+function applyPull(team, seat){
+  const arr = team==='red' ? rightTeamMembers : leftTeamMembers;
+  if(team==='red'){
     rightScore++;
     pos = clamp(pos + PULL_STEP, -WIN_THRESHOLD, WIN_THRESHOLD);
-    rightChar.pullPulse = 1;
-    spawnBurst(W/2 + 40 + visualPos*2, groundY-90, '#ffd23f', 14);
-    spawnDust(W*0.70, groundY, 1);
   } else {
     leftScore++;
     pos = clamp(pos - PULL_STEP, -WIN_THRESHOLD, WIN_THRESHOLD);
-    leftChar.pullPulse = 1;
-    spawnBurst(W/2 - 40 + visualPos*2, groundY-90, '#ffd23f', 14);
-    spawnDust(W*0.30, groundY, -1);
   }
-  checkWinCPU();
-  if(mode==='online') sendOnlineScore();
+  const member = arr.find(c=>c.seat===seat);
+  if(member) member.pullPulse = 1; else arr.forEach(c=>c.pullPulse=1);
 }
 
-function cpuCorrect(){
-  rightScore++;
-  pos = clamp(pos + PULL_STEP, -WIN_THRESHOLD, WIN_THRESHOLD);
-  rightChar.pullPulse = 1;
-  const groundY = H*0.66;
-  spawnBurst(W/2 + 40 + visualPos*2, groundY-90, '#ff8a5c', 14);
-  spawnDust(W*0.70, groundY, 1);
-  checkWinCPU();
-}
-
-function checkWinCPU(){
+function checkWin(){
   if(gameOverHandled) return;
   if(pos<=-WIN_THRESHOLD){ endGame('left'); }
   else if(pos>=WIN_THRESHOLD){ endGame('right'); }
   else if(Math.abs(pos)>=WIN_THRESHOLD*0.6) triggerShake(4);
+}
+
+function onLocalCorrect(){
+  const groundY = H*0.66;
+  applyPull(myTeam, mySeat);
+  const dirSign = myTeam==='red' ? 1 : -1;
+  spawnBurst(W/2 + dirSign*40 + visualPos*2, groundY-90, '#ffd23f', 14);
+  spawnDust(myTeam==='red' ? W*0.70 : W*0.30, groundY, dirSign);
+  checkWin();
+  if(mode==='online') sendOnlineScore();
+}
+
+function cpuCorrect(){
+  applyPull('red', 1); // CPU always occupies seat 1 in CPU mode
+  const groundY = H*0.66;
+  spawnBurst(W/2 + 40 + visualPos*2, groundY-90, '#ff8a5c', 14);
+  spawnDust(W*0.70, groundY, 1);
+  checkWin();
 }
 
 function cpuTick(dt){
@@ -858,9 +1140,9 @@ function cpuTick(dt){
     cpuTimer = cpuInterval();
     if(Math.random() < cpuAccuracy()) cpuCorrect();
     cpuProblem = generateProblem(difficulty);
+    rightBubbleText = cpuProblem.text;
   }
 }
-const _origLoop = loop;
 // hook cpu tick into main loop via separate rAF-independent timer
 setInterval(()=>{ cpuTick(0.1); }, 100);
 
@@ -868,7 +1150,12 @@ setInterval(()=>{ cpuTick(0.1); }, 100);
 let roomCode = null;
 let role = null; // 'host' | 'guest'
 let ws = null;
-let myOnlineScore=0, oppOnlineScore=0;
+let myOnlineScore = 0;
+let onlineScoresBySeat = {}; // seat -> last known score, for delta tracking
+let latestRoster = null; // last "roster" broadcast, drives the lobby UI
+// Persisted across games (and page reloads) so returning players don't have
+// to retype their name every time.
+let myName = localStorage.getItem('tugOfWarName') || '';
 
 function wsURL(){
   return (location.protocol==='https:'?'wss://':'ws://') + location.host + '/ws';
@@ -881,7 +1168,7 @@ function connectWS(onOpen, onFail){
   ws.onopen = ()=>{ onOpen && onOpen(); };
   ws.onerror = ()=>{ onFail && onFail(); };
   ws.onclose = ()=>{
-    if(running && mode==='online'){ handleOpponentGone(); }
+    if(mode==='online'){ handleConnectionLost(); }
   };
   ws.onmessage = (ev)=>{
     let m; try{ m = JSON.parse(ev.data); } catch(e){ return; }
@@ -896,70 +1183,251 @@ function wsSend(obj){
 function handleWSMessage(m){
   switch(m.type){
     case 'hosted':
-      roomCode = m.code; role = 'host';
-      document.getElementById('host-code').textContent = roomCode;
+      roomCode = m.code; role = 'host'; mySeat = m.seat;
+      showScreen('screen-lobby');
+      renderLobby();
+      announceMyName();
       break;
     case 'joined':
-      role = 'guest';
+      role = 'guest'; mySeat = m.seat; roomCode = m.code;
       document.getElementById('join-error').textContent='';
+      showScreen('screen-lobby');
+      renderLobby();
+      announceMyName();
       break;
-    case 'guestJoined':
-      document.getElementById('host-status').style.display='none';
-      document.getElementById('btn-host-start').style.display='block';
+    case 'roster':
+      latestRoster = m;
+      // Live-preview the host's background pick immediately, not just at
+      // match start - the game canvas renders behind every screen anyway.
+      activeBackground = m.background || 'meadow';
+      renderLobby();
       break;
     case 'error':
       document.getElementById('join-error').textContent = m.message || 'Something went wrong.';
       document.getElementById('join-waiting').style.display='none';
       break;
     case 'start':
-      beginOnlineGame(role, m.startedAt);
+      beginOnlineGame(m);
       break;
-    case 'opponent':
-      if(!running) return;
-      opponentProblemText = m.problem || '';
-      if(typeof m.score==='number' && m.score!==oppOnlineScore){
-        const delta = m.score - oppOnlineScore;
-        oppOnlineScore = m.score;
-        for(let i=0;i<delta;i++){
-          if(role==='host'){ rightScore++; pos=clamp(pos+PULL_STEP,-WIN_THRESHOLD,WIN_THRESHOLD); rightChar.pullPulse=1; }
-          else { leftScore++; pos=clamp(pos-PULL_STEP,-WIN_THRESHOLD,WIN_THRESHOLD); leftChar.pullPulse=1; }
-        }
-        checkWinOnline();
-      }
+    case 'opponentProgress':
+      handleOpponentProgress(m);
       break;
-    case 'opponentLeft':
-      handleOpponentGone();
+    case 'playerLeft':
+      handlePlayerLeft(m.seat);
+      break;
+    case 'hostLeft':
+      handleHostLeft();
       break;
   }
 }
 
-function handleOpponentGone(){
-  if(running){
+// ---------- Lobby (team pick, character pick, roster display, host start) ----------
+const CHARACTER_LABELS = {
+  plain:'Plain', cap:'Cap', bandana:'Bandana', propeller:'Propeller',
+  bow:'Bow', mohawk:'Mohawk', glasses:'Glasses', mustache:'Mustache'
+};
+// Each character button shows an actual rendered preview (via the same
+// drawCharacter used in-game) rather than just a text label, so picking one
+// means seeing it, not guessing from a name.
+const charThumbCtx = {}; // character id -> its thumbnail canvas's 2d context
+function makeThumbCanvas(w,h){
+  const c = document.createElement('canvas');
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  c.width = w*dpr; c.height = h*dpr;
+  c.style.width = w+'px'; c.style.height = h+'px';
+  const tctx = c.getContext('2d');
+  tctx.setTransform(dpr,0,0,dpr,0,0);
+  return {canvas:c, tctx};
+}
+function buildCharacterGrid(){
+  const grid = document.getElementById('character-grid');
+  CHARACTERS.forEach(ch=>{
+    const btn = document.createElement('button');
+    btn.className = 'char-btn';
+    btn.dataset.character = ch;
+    const {canvas, tctx} = makeThumbCanvas(64,72);
+    charThumbCtx[ch] = tctx;
+    btn.appendChild(canvas);
+    const lbl = document.createElement('div');
+    lbl.textContent = CHARACTER_LABELS[ch];
+    btn.appendChild(lbl);
+    btn.onclick = ()=> wsSend({type:'setCharacter', character:ch});
+    grid.appendChild(btn);
+  });
+  redrawCharacterThumbs('#8a94a3');
+}
+function redrawCharacterThumbs(color){
+  const previewAnim = {blink:false, bounce:0, lean:0, pullPulse:0};
+  CHARACTERS.forEach(ch=>{
+    const tctx = charThumbCtx[ch];
+    tctx.clearRect(0,0,64,72);
+    drawCharacter(tctx, 32, 60, 0.5, color, false, {...previewAnim, character:ch}, null);
+  });
+}
+buildCharacterGrid();
+
+const BACKGROUND_LABELS = {meadow:'Meadow', desert:'Desert', snow:'Snow', sunset:'Sunset', night:'Night'};
+function buildBackgroundRow(){
+  const row = document.getElementById('background-row');
+  Object.keys(BACKGROUNDS).forEach(id=>{
+    const btn = document.createElement('button');
+    btn.className = 'bg-btn';
+    btn.dataset.background = id;
+    btn.textContent = BACKGROUND_LABELS[id] || id;
+    btn.onclick = ()=>{ if(role==='host') wsSend({type:'setBackground', background:id}); };
+    row.appendChild(btn);
+  });
+}
+buildBackgroundRow();
+
+// ---------- Player name ----------
+const nameInput = document.getElementById('name-input');
+nameInput.value = myName;
+function commitName(){
+  const val = nameInput.value.trim();
+  if(val === myName) return;
+  myName = val;
+  localStorage.setItem('tugOfWarName', myName);
+  wsSend({type:'setName', name: myName});
+}
+let nameDebounce = null;
+nameInput.addEventListener('input', ()=>{
+  clearTimeout(nameDebounce);
+  nameDebounce = setTimeout(commitName, 400);
+});
+nameInput.addEventListener('blur', commitName);
+nameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') nameInput.blur(); });
+// Send whatever name is already known (from a previous game/reload) as soon
+// as hosting/joining succeeds, so returning players don't retype it.
+function announceMyName(){
+  nameInput.value = myName;
+  if(myName) wsSend({type:'setName', name: myName});
+}
+
+function renderLobby(){
+  document.getElementById('lobby-code').textContent = roomCode || '----';
+  if(!latestRoster) return;
+  const rosterEl = document.getElementById('lobby-roster');
+  rosterEl.innerHTML = '';
+  latestRoster.players.forEach(p=>{
+    const row = document.createElement('div');
+    row.className = 'lobby-row' + (p.seat===mySeat ? ' me' : '');
+    const label = document.createElement('span');
+    let text = p.name || (p.seat===mySeat ? 'You' : 'Player '+(p.seat+1));
+    if(p.seat===mySeat && p.name) text += ' (You)';
+    text += p.isHost ? ' (Host)' : '';
+    if(p.character) text += ' - ' + (CHARACTER_LABELS[p.character] || p.character);
+    label.textContent = text;
+    const pill = document.createElement('span');
+    pill.className = 'team-pill ' + (p.team || 'none');
+    pill.textContent = p.team ? (p.team==='blue' ? 'Blue' : 'Red') : 'No team';
+    row.appendChild(label);
+    row.appendChild(pill);
+    rosterEl.appendChild(row);
+  });
+  const me = latestRoster.players.find(p=>p.seat===mySeat);
+  const myLobbyTeam = me ? me.team : null;
+  const myLobbyCharacter = me ? me.character : null;
+  document.getElementById('btn-team-blue').classList.toggle('selected', myLobbyTeam==='blue');
+  document.getElementById('btn-team-red').classList.toggle('selected', myLobbyTeam==='red');
+  redrawCharacterThumbs(myLobbyTeam==='red' ? '#e0524a' : myLobbyTeam==='blue' ? '#3a7bd5' : '#8a94a3');
+
+  // Dim characters a current teammate already has - a UI hint only, the
+  // server is the real enforcer (see "setCharacter" in main.go).
+  const takenByTeammate = new Set(
+    latestRoster.players
+      .filter(p=>myLobbyTeam && p.seat!==mySeat && p.team===myLobbyTeam && p.character)
+      .map(p=>p.character)
+  );
+  document.querySelectorAll('#character-grid .char-btn').forEach(btn=>{
+    const ch = btn.dataset.character;
+    btn.classList.toggle('selected', ch===myLobbyCharacter);
+    btn.classList.toggle('taken', ch!==myLobbyCharacter && takenByTeammate.has(ch));
+  });
+
+  const currentBg = latestRoster.background || 'meadow';
+  document.querySelectorAll('#background-row .bg-btn').forEach(btn=>{
+    btn.classList.toggle('selected', btn.dataset.background===currentBg);
+    btn.disabled = role!=='host';
+  });
+
+  document.getElementById('btn-lobby-start').style.display = role==='host' ? 'block' : 'none';
+  document.getElementById('lobby-wait-msg').style.display = role==='host' ? 'none' : 'block';
+}
+
+function handleOpponentProgress(m){
+  if(!running) return;
+  const sender = matchPlayers.find(p=>p.seat===m.seat);
+  if(!sender) return;
+  if(typeof m.problem === 'string'){
+    if(sender.team==='red') rightBubbleText = m.problem; else leftBubbleText = m.problem;
+  }
+  if(typeof m.score==='number'){
+    const prev = onlineScoresBySeat[m.seat] || 0;
+    if(m.score !== prev){
+      const delta = m.score - prev;
+      onlineScoresBySeat[m.seat] = m.score;
+      for(let i=0;i<delta;i++) applyPull(sender.team, sender.seat);
+      checkWin();
+    }
+  }
+}
+
+// A specific other player's seat is gone. My own team can never be the one
+// that empties here (I'm always still in it), so an emptied side is always
+// the opponents'.
+function handlePlayerLeft(seat){
+  if(!running) return;
+  leftTeamMembers = leftTeamMembers.filter(c=>c.seat!==seat);
+  rightTeamMembers = rightTeamMembers.filter(c=>c.seat!==seat);
+  matchPlayers = matchPlayers.filter(p=>p.seat!==seat);
+  if(leftTeamMembers.length===0 || rightTeamMembers.length===0){
     running = false;
     setInGameUI(false);
     document.getElementById('result-emoji').textContent='🚪';
-    document.getElementById('result-title').textContent='Friend Disconnected';
+    document.getElementById('result-title').textContent='Opponents Left';
     document.getElementById('result-sub').textContent='';
     showScreen('screen-result');
-  } else if(screens['screen-host'].classList.contains('active')){
-    document.getElementById('host-status').style.display='block';
-    document.getElementById('btn-host-start').style.display='none';
+  }
+}
+
+// The host disconnecting tears the whole room down server-side - no host
+// migration, so everyone else just gets bounced out.
+function handleHostLeft(){
+  running = false;
+  setInGameUI(false);
+  document.getElementById('result-emoji').textContent='🚪';
+  document.getElementById('result-title').textContent='Host Left';
+  document.getElementById('result-sub').textContent='The room was closed.';
+  showScreen('screen-result');
+  cleanupOnline();
+}
+
+// My own connection dropped (network loss, server restart) - distinct from
+// a "playerLeft"/"hostLeft" message about someone else.
+function handleConnectionLost(){
+  if(running){
+    running = false;
+    setInGameUI(false);
+    document.getElementById('result-emoji').textContent='🔌';
+    document.getElementById('result-title').textContent='Connection Lost';
+    document.getElementById('result-sub').textContent='';
+    showScreen('screen-result');
+  } else if(screens['screen-lobby'].classList.contains('active')){
+    document.getElementById('lobby-hint').textContent = 'Connection lost. Go back and try again.';
   }
 }
 
 function hostCreateRoom(){
-  document.getElementById('host-code').textContent='----';
-  document.getElementById('host-status').style.display='block';
-  document.getElementById('btn-host-start').style.display='none';
-  showScreen('screen-host');
+  document.getElementById('lobby-code').textContent = '----';
+  document.getElementById('lobby-roster').innerHTML = '';
+  document.getElementById('lobby-hint').textContent = 'Share this code so up to 3 others can join.';
+  latestRoster = null;
+  showScreen('screen-lobby');
   connectWS(
     ()=> wsSend({type:'host'}),
-    ()=>{ document.getElementById('host-status').innerHTML = '<p class="sub" style="margin-bottom:0;">Could not connect to the server.</p>'; }
+    ()=>{ document.getElementById('lobby-hint').textContent = 'Could not connect to the server.'; }
   );
-}
-
-function hostStartGame(){
-  wsSend({type:'start'});
 }
 
 function joinRoom(code){
@@ -972,17 +1440,21 @@ function joinRoom(code){
   );
 }
 
-function beginOnlineGame(myRole, startedAt){
-  role = myRole;
-  leftLabel = myRole==='host' ? 'You' : 'Friend';
-  rightLabel = myRole==='host' ? 'Friend' : 'You';
-  leftTag.textContent = leftLabel;
-  rightTag.textContent = rightLabel;
-  myOnlineScore=0; oppOnlineScore=0; pos=0; visualPos=0; gameOverHandled=false;
-  mode='online';
+function beginOnlineGame(m){
+  mode = 'online';
+  matchPlayers = m.players || [];
+  const me = matchPlayers.find(p=>p.seat===mySeat);
+  myTeam = me ? me.team : 'blue';
+  activeBackground = m.background || 'meadow';
+  buildTeams(matchPlayers);
+  onlineScoresBySeat = {};
+  matchPlayers.forEach(p=>{ onlineScoresBySeat[p.seat] = 0; });
+  leftBubbleText = ''; rightBubbleText = '';
+  myOnlineScore=0; pos=0; visualPos=0; gameOverHandled=false; leftScore=0; rightScore=0;
+  updateHudTags();
   showScreen(null);
   setInGameUI(true);
-  runCountdownThen(startedAt, ()=>{
+  runCountdownThen(m.startedAt, ()=>{
     running=true;
     difficulty='medium';
     renderProblem();
@@ -998,25 +1470,19 @@ function sendOnlineScore(){
   syncOnlineState();
 }
 
-function checkWinOnline(){
-  if(gameOverHandled) return;
-  if(pos<=-WIN_THRESHOLD){ endGame('left'); }
-  else if(pos>=WIN_THRESHOLD){ endGame('right'); }
-  else if(Math.abs(pos)>=WIN_THRESHOLD*0.6) triggerShake(4);
-}
-
 function cleanupOnline(){
   if(ws){
     try{ wsSend({type:'leave'}); ws.onclose=null; ws.close(); }catch(e){}
     ws=null;
   }
-  roomCode=null; role=null;
+  roomCode=null; role=null; mySeat=null; latestRoster=null;
 }
 
 // ================= FLOW / SCREENS =================
 function resetGameState(){
   pos=0; visualPos=0; leftScore=0; rightScore=0; particles=[]; gameOverHandled=false; running=false;
-  cpuProblem=null; opponentProblemText=''; currentProblem=null;
+  cpuProblem=null; currentProblem=null; leftBubbleText=''; rightBubbleText='';
+  leftTeamMembers=[]; rightTeamMembers=[]; matchPlayers=[]; myTeam=null; activeBackground='meadow';
 }
 
 function runCountdownThen(startedAt, cb){
@@ -1038,12 +1504,15 @@ function runCountdownThen(startedAt, cb){
 function startCPUGame(){
   resetGameState();
   mode='cpu';
-  leftLabel='You'; rightLabel='CPU ('+difficulty[0].toUpperCase()+difficulty.slice(1)+')';
-  leftTag.textContent='You'; rightTag.textContent = rightLabel;
+  mySeat = 0; myTeam = 'blue';
+  leftTeamMembers = [makeCharAnim(0,'plain')];
+  rightTeamMembers = [makeCharAnim(1,'plain')];
+  updateHudTags();
   showScreen(null);
   setInGameUI(true);
   cpuTimer = cpuInterval();
   cpuProblem = generateProblem(difficulty);
+  rightBubbleText = cpuProblem.text;
   const startedAt = Date.now()+2200;
   runCountdownThen(startedAt, ()=>{
     running=true;
@@ -1057,12 +1526,11 @@ function endGame(winnerSide){
   setInGameUI(false);
   triggerShake(10);
   setTimeout(()=>{
-    const iWon = mode==='cpu' ? winnerSide==='left'
-      : (role==='host' ? winnerSide==='left' : winnerSide==='right');
+    const iWon = winnerSide==='left' ? myTeam==='blue' : myTeam==='red';
     document.getElementById('result-emoji').textContent = iWon ? '🏆' : '😅';
     document.getElementById('result-title').textContent = iWon ? 'You Win!' : (mode==='cpu' ? 'CPU Wins!' : 'You Lose!');
-    const mine = mode==='cpu' ? leftScore : (role==='host'?leftScore:rightScore);
-    document.getElementById('result-sub').textContent = `${mine} correct answers`;
+    const mine = myTeam==='red' ? rightScore : leftScore;
+    document.getElementById('result-sub').textContent = mode==='cpu' ? `${mine} correct answers` : `${mine} team correct answers`;
     spawnConfetti();
     showScreen('screen-result');
   }, 500);
@@ -1084,8 +1552,11 @@ document.getElementById('diff-row').addEventListener('click',(e)=>{
 document.getElementById('btn-start-cpu').onclick = ()=> startCPUGame();
 
 document.getElementById('btn-host').onclick = ()=> hostCreateRoom();
-document.getElementById('btn-host-start').onclick = ()=> hostStartGame();
-document.getElementById('btn-host-cancel').onclick = ()=>{ cleanupOnline(); showScreen('screen-friend-menu'); };
+
+document.getElementById('btn-team-blue').onclick = ()=> wsSend({type:'setTeam', team:'blue'});
+document.getElementById('btn-team-red').onclick = ()=> wsSend({type:'setTeam', team:'red'});
+document.getElementById('btn-lobby-start').onclick = ()=> wsSend({type:'start'});
+document.getElementById('btn-lobby-back').onclick = ()=>{ cleanupOnline(); resetGameState(); showScreen('screen-friend-menu'); };
 
 document.getElementById('btn-join').onclick = ()=>{
   document.getElementById('join-input').value='';
